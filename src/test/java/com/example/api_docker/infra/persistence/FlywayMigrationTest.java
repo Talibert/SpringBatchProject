@@ -44,8 +44,8 @@ class FlywayMigrationTest extends RepositoryAbstractTests {
 
         MigrationInfo current = flyway.info().current();
         assertNotNull(current);
-        assertEquals("1", current.getVersion().getVersion());
-        assertEquals("create users table", current.getDescription());
+        assertEquals("2", current.getVersion().getVersion());
+        assertEquals("create spring batch tables", current.getDescription());
     }
 
     @Test
@@ -56,6 +56,14 @@ class FlywayMigrationTest extends RepositoryAbstractTests {
 
             try (ResultSet tables = metaData.getTables(null, null, "USERS", null)) {
                 assertTrue(tables.next(), "Tabela USERS deve existir no banco de dados");
+            }
+
+            try (ResultSet tables = metaData.getTables(null, null, "BATCH_JOB_INSTANCE", null)) {
+                assertTrue(tables.next(), "Tabela BATCH_JOB_INSTANCE deve existir no banco de dados");
+            }
+
+            try (ResultSet tables = metaData.getTables(null, null, "BATCH_JOB_EXECUTION", null)) {
+                assertTrue(tables.next(), "Tabela BATCH_JOB_EXECUTION deve existir no banco de dados");
             }
 
             List<String> columns = new ArrayList<>();

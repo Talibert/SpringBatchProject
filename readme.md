@@ -97,6 +97,66 @@ O projeto adota o **Flyway**:
 
 ---
 
+### 6. Ecossistema Spring Batch (Jobs Coletores e Calculadores)
+
+O projeto foi preparado para orquestrar cargas de trabalho em lote (Batch Processing) de alta performance e resiliência, divididas em duas categorias principais de Jobs:
+
+* **Jobs Coletores (`infra.batch.job.collector`):** Responsáveis pela ingestão e extração de dados brutos provenientes de fontes externas (APIs de terceiros, arquivos CSV/JSON, filas ou bancos legados), persistindo-os de maneira estruturada no banco para processamento posterior.
+* **Jobs Calculadores (`infra.batch.job.calculator`):** Atuam sobre os dados previamente ingeridos para realizar agregações analíticas, consolidações matemáticas e cálculos periódicos (como indicadores de negócio, relatórios ou fechamentos).
+
+Para entender a modelagem completa das tabelas do banco de dados geradas pelo Flyway, consulte [docs/diagrama_banco_spring_batch.md](docs/diagrama_banco_spring_batch.md).
+
+#### 🔄 Ciclo de Vida e Cooperação entre as Classes
+
+#### 🔄 Passo a Passo: Como as Classes Cooperam na Execução de um Job
+
+A orquestração de qualquer job (seja coletor ou calculador) segue um fluxo desacoplado de 6 etapas, coordenado entre as classes criadas:
+
+##### 1. Descoberta e Injeção Dinâmica dos Jobs (`Map<String, Job>`)
+* **Como funciona:** O Spring Framework possui o recurso nativo de resolução de coleções. No [`BatchJobLauncherService`](src/main/java/com/example/api_docker/infra/batch/service/BatchJobLauncherService.java), o construtor declara:
+  ```java
+  public BatchJobLauncherService(JobLauncher jobLauncher, JobExplorer jobExplorer, Map<String, Job> jobsByName)
+  ```
+* O Spring escaneia todo o contexto da aplicação, localiza todos os `@Bean` que retornam instâncias de `Job` (definidos em classes como [`CollectorJobConfig`](src/main/java/com/example/api_docker/infra/batch/job/collector/CollectorJobConfig.java) e [`CalculatorJobConfig`](src/main/java/com/example/api_docker/infra/batch/job/calculator/CalculatorJobConfig.java)) e injeta automaticamente esse mapa, onde a chave é o nome do bean (`"collectorJob"`, `"calculatorJob"`, etc.) e o valor é o próprio objeto do Job.
+* **Benefício:** Para adicionar um novo job coletor ou calculador no projeto, **não é necessário tocar no serviço de disparo**. Ele descobre o novo job sozinho pelo nome.
+
+##### 2. Disparo e Prevenção de Bloqueio (`run.id`)
+* **Origem:** O disparo pode vir de um endpoint REST autenticado, de um agendador (`@Scheduled`), de um consumidor Kafka ou de um comando CLI.
+* O chamador executa `batchJobLauncherService.runJob("collectorJob", parametrosCustom)`.
+* **Garantia de Execução Única:** No Spring Batch, uma mesma instância lógica de job (`JobInstance`) com os mesmos parâmetros identificadores só pode ser executada uma única vez se terminar com sucesso (`COMPLETED`). Se tentarmos rodar novamente com os mesmos parâmetros, o framework impede a execução.
+* Para contornar isso e permitir que jobs sejam disparados sempre que requisitados, o `BatchJobLauncherService` injeta automaticamente dois parâmetros a cada chamada:
+  * `run.id`: timestamp em milissegundos (`System.currentTimeMillis()`).
+  * `dataHoraDisparo`: timestamp ISO UTC (`Instant.now()`).
+* Em seguida, o serviço delega a execução para o `JobLauncher.run(job, parameters)`.
+
+##### 3. Criação de Metadados pelo `JobRepository`
+* Antes de executar qualquer lógica de negócio, o `JobLauncher` aciona o `JobRepository`.
+* O `JobRepository` realiza operações atômicas no banco de dados (tabelas criadas pela migration `V2`):
+  1. Cria ou recupera a instância lógica em `BATCH_JOB_INSTANCE`.
+  2. Cria uma nova tentativa física de execução em `BATCH_JOB_EXECUTION` com status `STARTING`.
+  3. Grava todos os parâmetros recebidos em `BATCH_JOB_EXECUTION_PARAMS`.
+
+##### 4. Hook de Início do Listener (`beforeJob`)
+* Como registramos `.listener(jobExecutionListener)` na construção dos jobs, o Spring Batch aciona o método `beforeJob()` do [`JobCompletionNotificationListener`](src/main/java/com/example/api_docker/infra/batch/listener/JobCompletionNotificationListener.java).
+* O listener extrai os metadados da execução (`jobName`, `jobExecutionId`, parâmetros) e emite logs estruturados indicando o início da operação para auditoria e monitoramento.
+
+##### 5. Execução dos Steps (Tasklets ou Chunks)
+* O job inicia seus passos sequenciais (definidos via `.start(step)` ou `.next(step)`):
+  * **No Job Coletor:** O step tipicamente conecta em fontes externas (APIs HTTP, arquivos CSV/S3, mensageria) e persiste os registros brutos em tabelas de staging no PostgreSQL.
+  * **No Job Calculador:** O step lê os dados brutos com paginação (`ItemReader`), aplica regras matemáticas/agregações (`ItemProcessor`) e grava os resultados consolidados nas tabelas analíticas finais (`ItemWriter`).
+* A cada chunk ou tasklet finalizado, o `JobRepository` atualiza as métricas em `BATCH_STEP_EXECUTION` (linhas lidas, gravadas, commits, rollbacks e eventuais skips de erro).
+* Se ocorrer algum erro recuperável, o checkpoint é armazenado no `BATCH_STEP_EXECUTION_CONTEXT` permitindo retomada posterior (*restartability*).
+
+##### 6. Hook de Término, Auditoria e Retorno (`afterJob`)
+* Ao concluir todos os passos (seja com sucesso ou por falha), o `JobRepository` atualiza o status final da execução em `BATCH_JOB_EXECUTION` para `COMPLETED` ou `FAILED`.
+* O Spring Batch aciona o método `afterJob()` do [`JobCompletionNotificationListener`](src/main/java/com/example/api_docker/infra/batch/listener/JobCompletionNotificationListener.java):
+  * O listener calcula a duração exata subtraindo `endTime - startTime`.
+  * Se `COMPLETED`: emite log com tempo total em milissegundos.
+  * Se `FAILED`: emite log de erro e extrai a descrição da falha (`ExitDescription`) com a causa raiz.
+* Por fim, o `JobLauncher` retorna o objeto `JobExecution` preenchido para o `BatchJobLauncherService`, que o devolve ao chamador com todos os identificadores e o status final.
+
+---
+
 ## 📁 Estrutura de Diretórios
 
 ```
@@ -109,6 +169,7 @@ src/main/java/com/example/api_docker/
 │   ├── auth/               # Commands, Results e UseCase de Autenticação / Login
 │   └── user/               # Commands, Queries (ListUsersQuery), Results e UseCases
 └── infra/
+    ├── batch/              # Ecossistema Spring Batch (Jobs Coletores, Calculadores, Listener, Service)
     ├── config/             # Configurações do Spring (OpenApiConfig, SecurityConfig, UserSeedConfig)
     ├── controller/         # Controllers REST, DTOs de entrada e PageResponse<T>
     ├── exception/          # GlobalExceptionHandler e ErrorResponse padronizado
@@ -117,7 +178,7 @@ src/main/java/com/example/api_docker/
     └── security/           # Filtro JWT, Token Generator e BCrypt
 
 src/main/resources/
-└── db/migration/           # Scripts SQL versionados do Flyway (V1__..., V2__...)
+└── db/migration/           # Scripts SQL do Flyway (V1__users, V2__spring_batch_tables)
 ```
 
 ---
