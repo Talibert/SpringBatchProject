@@ -52,7 +52,7 @@ class BatchJobLauncherServiceTest extends BatchIntegrationAbstractTests {
     @Test
     @DisplayName("Deve consultar JobExecution por id")
     void shouldRetrieveJobExecutionById() throws Exception {
-        JobExecution execution = jobLauncherService.runCollectorJob(Map.of());
+        JobExecution execution = jobLauncherService.runJob(CollectorJobConfig.COLLECTOR_JOB_NAME, Map.of());
         assertNotNull(execution);
 
         JobExecution found = jobLauncherService.getJobExecution(execution.getId());

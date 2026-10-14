@@ -1,5 +1,6 @@
 package com.example.api_docker.infra.batch.job.collector.step;
 
+import com.example.api_docker.infra.batch.job.collector.client.ExternalDataCollectorClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.StepContribution;
@@ -7,6 +8,8 @@ import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 /**
  * Step responsável por encapsular a lógica de execução da coleta de dados.
@@ -20,11 +23,25 @@ public class StepCollector implements Tasklet {
 
     private static final Logger log = LoggerFactory.getLogger(StepCollector.class);
 
+    private final ExternalDataCollectorClient externalDataCollectorClient;
+
+    public StepCollector(ExternalDataCollectorClient externalDataCollectorClient) {
+        this.externalDataCollectorClient = externalDataCollectorClient;
+    }
+
     @Override
     public RepeatStatus execute(StepContribution contribution, ChunkContext chunkContext) throws Exception {
         log.info("Executando StepCollector: iniciando processo de coleta e ingestão de dados brutos...");
 
-        // Ponto de extensão para regras de negócio de coleta (chamada a UseCases, WebClients, etc.)
+        // Extrai parâmetros passados para a execução do Job via StepContext
+        java.util.Map<String, Object> jobParameters = chunkContext.getStepContext().getJobParameters();
+        String dataReferencia = (String) jobParameters.getOrDefault("dataReferencia", "2026-10-13");
+        String origem = (String) jobParameters.getOrDefault("origem", "origem-padrao");
+
+        log.info("Processando coleta para dataReferencia=[{}] e origem=[{}]", dataReferencia, origem);
+
+        List<String> dadosColetados = externalDataCollectorClient.fetchExternalData(origem);
+        log.info("StepCollector obteve {} registros da fonte externa.", dadosColetados.size());
 
         log.info("StepCollector finalizado com sucesso.");
         return RepeatStatus.FINISHED;

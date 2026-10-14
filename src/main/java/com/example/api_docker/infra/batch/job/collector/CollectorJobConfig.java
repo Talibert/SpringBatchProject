@@ -1,5 +1,7 @@
 package com.example.api_docker.infra.batch.job.collector;
 
+import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
+import com.example.api_docker.infra.batch.descriptor.JobType;
 import com.example.api_docker.infra.batch.job.collector.step.StepCollector;
 import com.example.api_docker.infra.batch.listener.JobCompletionNotificationListener;
 import org.springframework.batch.core.Job;
@@ -66,5 +68,13 @@ public class CollectorJobConfig {
         return new StepBuilder("collectorStep", jobRepository)
                 .tasklet(stepCollector, transactionManager)
                 .build();
+    }
+
+    /**
+     * Declara os metadados do job coletor para descoberta e orquestração dinâmica.
+     */
+    @Bean
+    public JobDescriptor collectorJobDescriptor() {
+        return new JobDescriptor(COLLECTOR_JOB_NAME, JobType.COLLECTOR);
     }
 }

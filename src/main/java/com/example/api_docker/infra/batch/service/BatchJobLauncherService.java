@@ -1,7 +1,5 @@
 package com.example.api_docker.infra.batch.service;
 
-import com.example.api_docker.infra.batch.job.calculator.CalculatorJobConfig;
-import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.Job;
@@ -84,27 +82,7 @@ public class BatchJobLauncherService {
         return jobLauncher.run(job, parameters);
     }
 
-    /**
-     * Executa o Job Coletor base com parâmetros customizados.
-     *
-     * @param parametrosCustom Mapa de parâmetros adicionais.
-     * @return {@link JobExecution} resultante.
-     * @throws Exception em caso de erro no disparo.
-     */
-    public JobExecution runCollectorJob(Map<String, Object> parametrosCustom) throws Exception {
-        return runJob(CollectorJobConfig.COLLECTOR_JOB_NAME, parametrosCustom);
-    }
 
-    /**
-     * Executa o Job Calculador base com parâmetros customizados.
-     *
-     * @param parametrosCustom Mapa de parâmetros adicionais.
-     * @return {@link JobExecution} resultante.
-     * @throws Exception em caso de erro no disparo.
-     */
-    public JobExecution runCalculatorJob(Map<String, Object> parametrosCustom) throws Exception {
-        return runJob(CalculatorJobConfig.CALCULATOR_JOB_NAME, parametrosCustom);
-    }
 
     /**
      * Recupera os dados e status de uma execução de job pelo seu ID.

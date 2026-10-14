@@ -29,7 +29,7 @@ class CalculatorJobIntegrationTest extends BatchIntegrationAbstractTests {
     @Test
     @DisplayName("Deve disparar e executar o calculatorJob com sucesso persistindo metadados no banco")
     void shouldExecuteCalculatorJobSuccessfully() throws Exception {
-        JobExecution execution = jobLauncherService.runCalculatorJob(Map.of("tipoCalculo", "metricas-teste"));
+        JobExecution execution = jobLauncherService.runJob(CalculatorJobConfig.CALCULATOR_JOB_NAME, Map.of("tipoCalculo", "metricas-teste"));
 
         assertNotNull(execution);
         assertNotNull(execution.getId());
