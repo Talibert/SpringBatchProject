@@ -16,7 +16,8 @@ public class KafkaTopicRegistry {
 
     private static final Map<EventType, String> TOPICS = Map.of(
             EventType.USER_CREATED_EVENT, "user.created",
-            EventType.USER_PASSWORD_CHANGED_EVENT, "admin.password.changed"
+            EventType.USER_PASSWORD_CHANGED_EVENT, "admin.password.changed",
+            EventType.COLLECTOR_COMPLETED_EVENT, "batch.collector.completed"
     );
 
     public String topicFor(DomainEvent event) {

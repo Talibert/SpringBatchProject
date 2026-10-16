@@ -21,6 +21,11 @@ public class KafkaDomainEventPublisher implements DomainEventPublisher {
     @Override
     public void publish(DomainEvent event) {
         String topic = topicRegistry.topicFor(event);
-        kafkaTemplate.send(topic, event);
+        String partitionKey = event.partitionKey();
+        if (partitionKey != null) {
+            kafkaTemplate.send(topic, partitionKey, event);
+        } else {
+            kafkaTemplate.send(topic, event);
+        }
     }
 }

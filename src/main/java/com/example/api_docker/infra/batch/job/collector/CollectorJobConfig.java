@@ -1,7 +1,5 @@
 package com.example.api_docker.infra.batch.job.collector;
 
-import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
 import com.example.api_docker.infra.batch.job.collector.step.StepCollector;
 import com.example.api_docker.infra.batch.listener.JobCompletionNotificationListener;
 import org.springframework.batch.core.Job;
@@ -18,7 +16,7 @@ import org.springframework.transaction.PlatformTransactionManager;
  * <p>
  * <b>Papel na Arquitetura:</b>
  * Esta classe é puramente orquestradora: monta o pipeline do Job conectando os metadados,
- * listeners de auditoria e o step de execução ([@link StepCollector]). Toda a lógica operacional
+ * listeners de auditoria e o step de execução ({@link StepCollector}). Toda a lógica operacional
  * de coleta reside na classe dedicada do Step.
  */
 @Configuration
@@ -68,13 +66,5 @@ public class CollectorJobConfig {
         return new StepBuilder("collectorStep", jobRepository)
                 .tasklet(stepCollector, transactionManager)
                 .build();
-    }
-
-    /**
-     * Declara os metadados do job coletor para descoberta e orquestração dinâmica.
-     */
-    @Bean
-    public JobDescriptor collectorJobDescriptor() {
-        return new JobDescriptor(COLLECTOR_JOB_NAME, JobType.COLLECTOR);
     }
 }

@@ -1,12 +1,7 @@
 package com.example.api_docker.infra.batch.job.calculator;
 
-import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
-import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
 import com.example.api_docker.infra.batch.job.calculator.step.StepCalculator;
 import com.example.api_docker.infra.batch.listener.JobCompletionNotificationListener;
-
-import java.util.List;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -71,17 +66,5 @@ public class CalculatorJobConfig {
         return new StepBuilder("calculatorStep", jobRepository)
                 .tasklet(stepCalculator, transactionManager)
                 .build();
-    }
-
-    /**
-     * Declara os metadados do job calculador, incluindo suas dependências de jobs coletores.
-     */
-    @Bean
-    public JobDescriptor calculatorJobDescriptor() {
-        return new JobDescriptor(
-                CALCULATOR_JOB_NAME,
-                JobType.CALCULATOR,
-                List.of(CollectorJobConfig.COLLECTOR_JOB_NAME)
-        );
     }
 }
