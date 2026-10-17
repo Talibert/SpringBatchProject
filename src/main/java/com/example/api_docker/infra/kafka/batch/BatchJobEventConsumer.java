@@ -31,15 +31,16 @@ public class BatchJobEventConsumer extends KafkaConsumer {
      */
     @KafkaListener(topics = "batch.job.completed", groupId = "${spring.kafka.consumer.group-id:my-group}")
     public void onJobCompleted(BatchJobCompletedEvent event) {
-        log.info("📢 [KAFKA BATCH CONSUMER] Job finalizado! Job=[{}], Tipo=[{}], DataRef=[{}], Status=[{}], TargetCalculator=[{}]",
-                event.jobName(), event.jobType(), event.dataReferencia(), event.status(), event.targetCalculatorJob());
+        String targetJob = event.hasTargetContext() ? event.targetContext().targetJobName() : null;
+        log.info("📢 [KAFKA BATCH CONSUMER] Job finalizado! Job=[{}], Tipo=[{}], DataRef=[{}], Status=[{}], Target=[{}]",
+                event.jobName(), event.jobType(), event.dataReferencia(), event.status(), targetJob);
 
-        // Se disparamos APENAS o coletor (sem target), ele NÃO checa calculadores.
+        // Se disparamos APENAS o coletor (sem targetContext), ele NÃO checa calculadores.
         // O plus de checar o target SÓ ocorre se o coletor vier da dependência de um calculador.
-        if (event.isCollector() && event.hasTargetCalculator()) {
-            orchestratorService.onCollectorCompleted(event.jobName(), event.dataReferencia(), event.targetCalculatorJob());
+        if (event.isCollector() && event.hasTargetContext()) {
+            orchestratorService.onCollectorCompleted(event.jobName(), event.dataReferencia(), event.targetContext());
         } else {
-            log.debug("Job [{}] finalizado sem target calculator. Nenhuma checagem de orquestração necessária.", event.jobName());
+            log.debug("Job [{}] finalizado sem target context. Nenhuma checagem de orquestração necessária.", event.jobName());
         }
     }
 }

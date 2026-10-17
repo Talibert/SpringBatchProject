@@ -1,6 +1,7 @@
 package com.example.api_docker.domain.batch.event;
 
 import com.example.api_docker.domain.batch.JobType;
+import com.example.api_docker.domain.batch.TargetCalculatorContext;
 import com.example.api_docker.domain.shared.DomainEvent;
 import com.example.api_docker.domain.shared.EventType;
 
@@ -12,17 +13,17 @@ import java.util.UUID;
  * Evento emitido quando qualquer Job do Spring Batch (Coletor ou Calculador) finaliza com sucesso.
  * <p>
  * Notifica o ecossistema e consumidores (como frontend em Vue / WebSocket / SSE) sobre a conclusão
- * de um processamento em lote. O campo {@code targetCalculatorJob} só é preenchido quando o job concluído
+ * de um processamento em lote. O campo {@code targetContext} só é preenchido quando o job concluído
  * for um Coletor disparado especificamente para satisfazer dependências de um Calculador.
  *
- * @param eventId             Identificador único do evento.
- * @param jobName             Nome lógico do Job concluído (ex: collectorJob, calculatorJob).
- * @param jobType             Classificação funcional tipada do job (COLLECTOR ou CALCULATOR).
- * @param dataReferencia      Data de corte ou referência dos dados (ex: 2026-10-15).
- * @param executionId         Identificador físico da execução no Spring Batch.
- * @param status              Status de conclusão do Job (ex: COMPLETED).
- * @param targetCalculatorJob Nome do calculador alvo que solicitou a execução (nulo se disparo avulso).
- * @param occurredAt          Momento exato da conclusão.
+ * @param eventId        Identificador único do evento.
+ * @param jobName        Nome lógico do Job concluído (ex: collectorJob, calculatorJob).
+ * @param jobType        Classificação funcional tipada do job (COLLECTOR ou CALCULATOR).
+ * @param dataReferencia Data de corte ou referência dos dados (ex: 2026-10-15).
+ * @param executionId    Identificador físico da execução no Spring Batch.
+ * @param status         Status de conclusão do Job (ex: COMPLETED).
+ * @param targetContext  Contexto do calculador alvo (Value Object), nulo se disparo avulso.
+ * @param occurredAt     Momento exato da conclusão.
  */
 public record BatchJobCompletedEvent(
         UUID eventId,
@@ -31,7 +32,7 @@ public record BatchJobCompletedEvent(
         String dataReferencia,
         Long executionId,
         String status,
-        String targetCalculatorJob,
+        TargetCalculatorContext targetContext,
         LocalDateTime occurredAt
 ) implements DomainEvent {
 
@@ -51,7 +52,7 @@ public record BatchJobCompletedEvent(
             String dataReferencia,
             Long executionId,
             String status,
-            String targetCalculatorJob
+            TargetCalculatorContext targetContext
     ) {
         return new BatchJobCompletedEvent(
                 UUID.randomUUID(),
@@ -60,7 +61,7 @@ public record BatchJobCompletedEvent(
                 dataReferencia,
                 executionId,
                 status,
-                targetCalculatorJob,
+                targetContext,
                 LocalDateTime.now()
         );
     }
@@ -83,8 +84,8 @@ public record BatchJobCompletedEvent(
         return jobType == JobType.CALCULATOR;
     }
 
-    public boolean hasTargetCalculator() {
-        return targetCalculatorJob != null && !targetCalculatorJob.isBlank();
+    public boolean hasTargetContext() {
+        return targetContext != null;
     }
 
     @Override

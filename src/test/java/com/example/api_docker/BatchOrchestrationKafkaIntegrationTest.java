@@ -69,7 +69,7 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
 
         List<BatchJobCompletedEvent> capturedEvents = eventCaptor.getAllValues();
 
-        // Valida evento do Coletor (contém targetCalculatorJob preenchido)
+        // Valida evento do Coletor (contém targetContext preenchido)
         BatchJobCompletedEvent collectorEvent = capturedEvents.stream()
                 .filter(BatchJobCompletedEvent::isCollector)
                 .findFirst()
@@ -77,7 +77,9 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
         assertEquals(CollectorJobConfig.COLLECTOR_JOB_NAME, collectorEvent.jobName());
         assertEquals(dataReferencia, collectorEvent.dataReferencia());
         assertEquals("COMPLETED", collectorEvent.status());
-        assertEquals(CalculatorJobConfig.CALCULATOR_JOB_NAME, collectorEvent.targetCalculatorJob());
+        assertNotNull(collectorEvent.targetContext());
+        assertEquals(CalculatorJobConfig.CALCULATOR_JOB_NAME, collectorEvent.targetContext().targetJobName());
+        assertEquals(Map.of("origem", "e2e-kafka-test"), collectorEvent.targetContext().customParams());
 
         // Valida evento do Calculador (capturado para o front, sem target)
         BatchJobCompletedEvent calculatorEvent = capturedEvents.stream()
@@ -87,7 +89,7 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
         assertEquals(CalculatorJobConfig.CALCULATOR_JOB_NAME, calculatorEvent.jobName());
         assertEquals(dataReferencia, calculatorEvent.dataReferencia());
         assertEquals("COMPLETED", calculatorEvent.status());
-        assertNull(calculatorEvent.targetCalculatorJob());
+        assertNull(calculatorEvent.targetContext());
 
         // 3. Valida no JobExplorer que o calculatorJob de fato concluiu com sucesso
         boolean calculatorCompleted = orchestratorService.isJobCompletedForDate(

@@ -1,8 +1,10 @@
 package com.example.api_docker.infra.batch.service;
 
+import com.example.api_docker.domain.batch.JobType;
+import com.example.api_docker.domain.batch.TargetCalculatorContext;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.domain.batch.JobType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -36,17 +38,20 @@ public class BatchOrchestratorService {
     private final BatchJobLauncherService jobLauncherService;
     private final JobExplorer jobExplorer;
     private final Map<String, JobDescriptor> descriptorsByName;
+    private final ObjectMapper objectMapper;
 
     public BatchOrchestratorService(
             BatchJobLauncherService jobLauncherService,
             JobExplorer jobExplorer,
-            List<BatchJobDescriptorProvider> descriptorProviders
+            List<BatchJobDescriptorProvider> descriptorProviders,
+            ObjectMapper objectMapper
     ) {
         this.jobLauncherService = jobLauncherService;
         this.jobExplorer = jobExplorer;
         this.descriptorsByName = descriptorProviders.stream()
                 .map(BatchJobDescriptorProvider::getDescriptor)
                 .collect(Collectors.toMap(JobDescriptor::jobName, Function.identity(), (d1, d2) -> d1));
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -125,11 +130,14 @@ public class BatchOrchestratorService {
                 log.warn("Calculador [{}] possui {} coletas pendentes para data [{}]: {}. Disparando coletores em paralelo...",
                         jobName, coletasPendentes.size(), dataReferencia, coletasPendentes);
 
+                TargetCalculatorContext targetContext = TargetCalculatorContext.of(jobName, customParams);
+                String targetContextJson = serializeTargetContext(targetContext);
+
                 // Dispara todos os coletores pendentes em paralelo (executados pelo ThreadPool do Spring Batch)
                 for (String collectorJobName : coletasPendentes) {
                     Map<String, Object> collectorParams = Map.of(
                             "dataReferencia", dataReferencia,
-                            "targetCalculatorJob", jobName
+                            "targetCalculatorContext", targetContextJson
                     );
                     jobLauncherService.runJob(collectorJobName, collectorParams);
                 }
@@ -169,21 +177,22 @@ public class BatchOrchestratorService {
     /**
      * Ponto de entrada acionado quando um Job Coletor acionado por um Calculador alvo finaliza com sucesso.
      * <p>
-     * Avalia única e exclusivamente o {@code targetCalculatorJob}. Se todas as suas dependências estiverem
-     * satisfeitas para a data, dispara o cálculo.
-     * Não há avaliação em lote nem fallback: coletas avulsas nunca avaliam calculadores.
+     * Avalia única e exclusivamente as dependências do calculador especificado em {@code targetContext}.
+     * Se todas as dependências estiverem satisfeitas para a data, dispara o cálculo preservando integralmente
+     * os parâmetros customizados informados na solicitação original de cálculo.
      *
-     * @param collectorJobName    Nome do coletor concluído.
-     * @param dataReferencia      Data de referência concluída.
-     * @param targetCalculatorJob Nome do calculador alvo que solicitou a coleta (obrigatório).
+     * @param collectorJobName Nome do coletor concluído.
+     * @param dataReferencia   Data de referência concluída.
+     * @param targetContext    Value Object contendo o calculador alvo e seus parâmetros originais (obrigatório).
      */
-    public void onCollectorCompleted(String collectorJobName, String dataReferencia, String targetCalculatorJob) {
-        if (targetCalculatorJob == null || targetCalculatorJob.isBlank()) {
-            log.warn("onCollectorCompleted acionado sem targetCalculatorJob para coletor [{}]. Nenhuma checagem será executada.",
+    public void onCollectorCompleted(String collectorJobName, String dataReferencia, TargetCalculatorContext targetContext) {
+        if (targetContext == null || targetContext.targetJobName() == null || targetContext.targetJobName().isBlank()) {
+            log.warn("onCollectorCompleted acionado sem targetContext para coletor [{}]. Nenhuma checagem será executada.",
                     collectorJobName);
             return;
         }
 
+        String targetCalculatorJob = targetContext.targetJobName();
         log.info("Notificação de conclusão recebida para coletor [{}] na data [{}], avaliando calculador alvo [{}]",
                 collectorJobName, dataReferencia, targetCalculatorJob);
 
@@ -203,10 +212,12 @@ public class BatchOrchestratorService {
         );
 
         if (pendentes.isEmpty()) {
-            log.info("🎉 Todas as dependências do calculador alvo [{}] foram concluídas para data [{}]. Disparando cálculo automaticamente!",
+            log.info("🎉 Todas as dependências do calculador alvo [{}] foram concluídas para data [{}]. Disparando cálculo com parâmetros originais preservados!",
                     targetDescriptor.jobName(), dataReferencia);
             try {
-                jobLauncherService.runJob(targetDescriptor.jobName(), Map.of("dataReferencia", dataReferencia));
+                Map<String, Object> calculatorParams = new HashMap<>(targetContext.customParams());
+                calculatorParams.put("dataReferencia", dataReferencia);
+                jobLauncherService.runJob(targetDescriptor.jobName(), calculatorParams);
             } catch (Exception e) {
                 log.error("Erro ao disparar automaticamente calculador alvo [{}] após término das coletas",
                         targetDescriptor.jobName(), e);
@@ -214,6 +225,15 @@ public class BatchOrchestratorService {
         } else {
             log.info("Calculador alvo [{}] na data [{}] ainda aguarda as seguintes coletas: {}",
                     targetDescriptor.jobName(), dataReferencia, pendentes);
+        }
+    }
+
+    private String serializeTargetContext(TargetCalculatorContext context) {
+        try {
+            return objectMapper.writeValueAsString(context);
+        } catch (Exception e) {
+            log.error("Erro ao serializar TargetCalculatorContext para o job [{}]", context.targetJobName(), e);
+            throw new RuntimeException("Falha ao serializar contexto da orquestração", e);
         }
     }
 

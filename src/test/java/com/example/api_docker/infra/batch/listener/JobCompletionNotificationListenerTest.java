@@ -1,10 +1,12 @@
 package com.example.api_docker.infra.batch.listener;
 
 import com.example.api_docker.domain.batch.JobType;
+import com.example.api_docker.domain.batch.TargetCalculatorContext;
 import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.example.api_docker.domain.shared.DomainEventPublisher;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.springframework.batch.core.JobParametersBuilder;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -28,6 +31,7 @@ class JobCompletionNotificationListenerTest {
 
     private DomainEventPublisher eventPublisher;
     private JobCompletionNotificationListener listener;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String COLLECTOR_JOB_NAME = "collectorJob";
     private static final String CALCULATOR_JOB_NAME = "calculatorJob";
@@ -44,7 +48,8 @@ class JobCompletionNotificationListenerTest {
 
         listener = new JobCompletionNotificationListener(
                 eventPublisher,
-                List.of(collectorProvider, calculatorProvider)
+                List.of(collectorProvider, calculatorProvider),
+                objectMapper
         );
     }
 
@@ -71,18 +76,21 @@ class JobCompletionNotificationListenerTest {
         assertEquals(dataRef, event.dataReferencia());
         assertEquals(execution.getId(), event.executionId());
         assertEquals("COMPLETED", event.status());
-        assertNull(event.targetCalculatorJob(), "targetCalculatorJob deve ser nulo quando não fornecido nos parâmetros");
-        assertFalse(event.hasTargetCalculator());
+        assertNull(event.targetContext(), "targetContext deve ser nulo quando não fornecido nos parâmetros");
+        assertFalse(event.hasTargetContext());
         assertEquals(dataRef, event.partitionKey(), "A partitionKey deve ser igual à dataReferencia");
     }
 
     @Test
-    @DisplayName("Deve publicar BatchJobCompletedEvent com targetCalculatorJob preenchido quando informado nos parâmetros")
-    void shouldPublishEventWithTargetCalculatorJobWhenPresent() {
+    @DisplayName("Deve publicar BatchJobCompletedEvent com TargetCalculatorContext preenchido quando informado nos parâmetros")
+    void shouldPublishEventWithTargetCalculatorContextWhenPresent() throws Exception {
         String dataRef = "2026-10-17";
+        TargetCalculatorContext targetContext = TargetCalculatorContext.of(CALCULATOR_JOB_NAME, Map.of("limite", 100));
+        String targetContextJson = objectMapper.writeValueAsString(targetContext);
+
         JobParameters params = new JobParametersBuilder()
                 .addString("dataReferencia", dataRef)
-                .addString("targetCalculatorJob", CALCULATOR_JOB_NAME)
+                .addString("targetCalculatorContext", targetContextJson)
                 .toJobParameters();
 
         JobExecution execution = createExecution(COLLECTOR_JOB_NAME, params, BatchStatus.COMPLETED, ExitStatus.COMPLETED);
@@ -96,8 +104,10 @@ class JobCompletionNotificationListenerTest {
         assertEquals(COLLECTOR_JOB_NAME, event.jobName());
         assertEquals(JobType.COLLECTOR, event.jobType());
         assertEquals(dataRef, event.dataReferencia());
-        assertEquals(CALCULATOR_JOB_NAME, event.targetCalculatorJob());
-        assertTrue(event.hasTargetCalculator());
+        assertNotNull(event.targetContext());
+        assertEquals(CALCULATOR_JOB_NAME, event.targetContext().targetJobName());
+        assertEquals(100, event.targetContext().customParams().get("limite"));
+        assertTrue(event.hasTargetContext());
     }
 
     @Test
@@ -121,8 +131,8 @@ class JobCompletionNotificationListenerTest {
         assertTrue(event.isCalculator());
         assertFalse(event.isCollector());
         assertEquals(dataRef, event.dataReferencia());
-        assertNull(event.targetCalculatorJob());
-        assertFalse(event.hasTargetCalculator());
+        assertNull(event.targetContext());
+        assertFalse(event.hasTargetContext());
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.example.api_docker.infra.batch.service;
 
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
 import com.example.api_docker.domain.batch.JobType;
+import com.example.api_docker.domain.batch.TargetCalculatorContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ class BatchOrchestratorServiceTest {
 
     private BatchJobLauncherService jobLauncherService;
     private JobExplorer jobExplorer;
+    private ObjectMapper objectMapper;
     private BatchOrchestratorService orchestratorService;
 
     private final JobDescriptor collectorA = new JobDescriptor("coletorA", JobType.COLLECTOR);
@@ -45,11 +48,13 @@ class BatchOrchestratorServiceTest {
     void setUp() {
         jobLauncherService = mock(BatchJobLauncherService.class);
         jobExplorer = mock(JobExplorer.class);
+        objectMapper = new ObjectMapper();
 
         orchestratorService = new BatchOrchestratorService(
                 jobLauncherService,
                 jobExplorer,
-                List.of(() -> collectorA, () -> collectorB, () -> calculatorJob, () -> calculatorJob2)
+                List.of(() -> collectorA, () -> collectorB, () -> calculatorJob, () -> calculatorJob2),
+                objectMapper
         );
     }
 
@@ -94,10 +99,11 @@ class BatchOrchestratorServiceTest {
 
         // coletorA não precisa ser redisparado
         verify(jobLauncherService, never()).runJob(eq("coletorA"), any());
-        // coletorB deve ser disparado contendo dataReferencia e targetCalculatorJob
+        // coletorB deve ser disparado contendo dataReferencia e targetCalculatorContext
+        String expectedContextJson = objectMapper.writeValueAsString(TargetCalculatorContext.of("calculadorGeral", Map.of()));
         verify(jobLauncherService, times(1)).runJob(
                 eq("coletorB"),
-                eq(Map.of("dataReferencia", dataRef, "targetCalculatorJob", "calculadorGeral"))
+                eq(Map.of("dataReferencia", dataRef, "targetCalculatorContext", expectedContextJson))
         );
         // calculadorGeral não deve rodar ainda
         verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
@@ -112,7 +118,7 @@ class BatchOrchestratorServiceTest {
         when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
         when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
 
-        orchestratorService.onCollectorCompleted("coletorA", dataRef, "calculadorGeral");
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, TargetCalculatorContext.of("calculadorGeral"));
         verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
 
         // Cenário 2: coletorA já está no banco como COMPLETED, mas coletorB AINDA NÃO comitou no JobExplorer
@@ -120,7 +126,7 @@ class BatchOrchestratorServiceTest {
         when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
 
         // coletorB emite seu evento de conclusão direcionado para calculadorGeral
-        orchestratorService.onCollectorCompleted("coletorB", dataRef, "calculadorGeral");
+        orchestratorService.onCollectorCompleted("coletorB", dataRef, TargetCalculatorContext.of("calculadorGeral"));
 
         // Como coletorB veio no próprio evento (em memória) e coletorA já estava no banco, o calculador é acionado sem race condition!
         verify(jobLauncherService, times(1)).runJob(eq("calculadorGeral"), eq(Map.of("dataReferencia", dataRef)));
@@ -211,7 +217,7 @@ class BatchOrchestratorServiceTest {
         mockJobCompletedForDate("coletorB", dataRef);
 
         // Notifica que coletorA terminou, mas direcionado apenas para calculadorSecundario
-        orchestratorService.onCollectorCompleted("coletorA", dataRef, "calculadorSecundario");
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, TargetCalculatorContext.of("calculadorSecundario"));
 
         // Apenas calculadorSecundario deve ser executado
         verify(jobLauncherService, times(1)).runJob(eq("calculadorSecundario"), eq(Map.of("dataReferencia", dataRef)));
@@ -219,7 +225,7 @@ class BatchOrchestratorServiceTest {
     }
 
     @Test
-    @DisplayName("Modelo Direcionado: Não deve disparar nenhum calculador quando targetCalculatorJob for nulo ou vazio")
+    @DisplayName("Modelo Direcionado: Não deve disparar nenhum calculador quando targetCalculatorContext for nulo ou targetJobName for vazio")
     void shouldNotTriggerAnyCalculatorWhenTargetCalculatorIsNullOrEmpty() throws Exception {
         String dataRef = "2026-10-15";
 
@@ -228,8 +234,8 @@ class BatchOrchestratorServiceTest {
 
         // Notifica que coletorA terminou sem target (ou vazio)
         orchestratorService.onCollectorCompleted("coletorA", dataRef, null);
-        orchestratorService.onCollectorCompleted("coletorA", dataRef, "");
-        orchestratorService.onCollectorCompleted("coletorA", dataRef, "   ");
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, TargetCalculatorContext.of(""));
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, TargetCalculatorContext.of("   "));
 
         // Nenhum calculador deve ser disparado
         verify(jobLauncherService, never()).runJob(any(), any());
@@ -241,9 +247,52 @@ class BatchOrchestratorServiceTest {
         String dataRef = "2026-10-15";
 
         // calculadorSecundario depende apenas de coletorA, não depende de coletorB
-        orchestratorService.onCollectorCompleted("coletorB", dataRef, "calculadorSecundario");
+        orchestratorService.onCollectorCompleted("coletorB", dataRef, TargetCalculatorContext.of("calculadorSecundario"));
 
         verify(jobLauncherService, never()).runJob(any(), any());
+    }
+
+    @Test
+    @DisplayName("Deve preservar customParams ao disparar o calculador após conclusão de dependências")
+    void shouldPreserveCustomParamsWhenTriggeringCalculatorAfterCollectorCompleted() throws Exception {
+        String dataRef = "2026-10-15";
+        mockJobCompletedForDate("coletorA", dataRef);
+
+        TargetCalculatorContext context = TargetCalculatorContext.of(
+                "calculadorGeral",
+                Map.of("taxaBase", 0.15, "origem", "bacen")
+        );
+
+        orchestratorService.onCollectorCompleted("coletorB", dataRef, context);
+
+        verify(jobLauncherService, times(1)).runJob(
+                eq("calculadorGeral"),
+                eq(Map.of("dataReferencia", dataRef, "taxaBase", 0.15, "origem", "bacen"))
+        );
+    }
+
+    @Test
+    @DisplayName("triggerJob: Deve serializar customParams no targetCalculatorContext ao disparar coletores")
+    void shouldSerializeTargetCalculatorContextWithCustomParamsWhenDispatchingCollectors() throws Exception {
+        String dataRef = "2026-10-15";
+        when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
+        when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
+
+        Map<String, Object> customParams = Map.of("ambiente", "prod", "tentativas", 3);
+        orchestratorService.triggerJob("calculadorGeral", dataRef, customParams);
+
+        String expectedJson = objectMapper.writeValueAsString(
+                TargetCalculatorContext.of("calculadorGeral", customParams)
+        );
+
+        verify(jobLauncherService, times(1)).runJob(
+                eq("coletorA"),
+                eq(Map.of("dataReferencia", dataRef, "targetCalculatorContext", expectedJson))
+        );
+        verify(jobLauncherService, times(1)).runJob(
+                eq("coletorB"),
+                eq(Map.of("dataReferencia", dataRef, "targetCalculatorContext", expectedJson))
+        );
     }
 
     private void mockJobCompletedForDate(String jobName, String dataReferencia) {

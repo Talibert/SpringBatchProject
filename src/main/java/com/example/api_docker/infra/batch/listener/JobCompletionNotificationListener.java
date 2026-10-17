@@ -1,10 +1,12 @@
 package com.example.api_docker.infra.batch.listener;
 
 import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
+import com.example.api_docker.domain.batch.JobType;
+import com.example.api_docker.domain.batch.TargetCalculatorContext;
 import com.example.api_docker.domain.shared.DomainEventPublisher;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.domain.batch.JobType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -34,15 +36,18 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
 
     private final DomainEventPublisher eventPublisher;
     private final Map<String, JobDescriptor> descriptorsByName;
+    private final ObjectMapper objectMapper;
 
     public JobCompletionNotificationListener(
             DomainEventPublisher eventPublisher,
-            List<BatchJobDescriptorProvider> descriptorProviders
+            List<BatchJobDescriptorProvider> descriptorProviders,
+            ObjectMapper objectMapper
     ) {
         this.eventPublisher = eventPublisher;
         this.descriptorsByName = descriptorProviders.stream()
                 .map(BatchJobDescriptorProvider::getDescriptor)
                 .collect(Collectors.toMap(JobDescriptor::jobName, java.util.function.Function.identity(), (d1, d2) -> d1));
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -84,7 +89,8 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
                 dataReferencia = LocalDate.now().toString();
             }
 
-            String targetCalculatorJob = jobExecution.getJobParameters().getString("targetCalculatorJob");
+            String targetContextJson = jobExecution.getJobParameters().getString("targetCalculatorContext");
+            TargetCalculatorContext targetContext = parseTargetContext(targetContextJson, jobName);
 
             BatchJobCompletedEvent event = BatchJobCompletedEvent.of(
                     jobName,
@@ -92,12 +98,24 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
                     dataReferencia,
                     jobExecution.getId(),
                     jobExecution.getStatus().name(),
-                    targetCalculatorJob
+                    targetContext
             );
 
-            log.info("📢 Publicando BatchJobCompletedEvent no Kafka: Job=[{}], Tipo=[{}], DataRef=[{}], TargetCalculator=[{}]",
-                    jobName, descriptor.type(), dataReferencia, targetCalculatorJob);
+            log.info("📢 Publicando BatchJobCompletedEvent no Kafka: Job=[{}], Tipo=[{}], DataRef=[{}], Target=[{}]",
+                    jobName, descriptor.type(), dataReferencia, targetContext != null ? targetContext.targetJobName() : null);
             eventPublisher.publish(event);
+        }
+    }
+
+    private TargetCalculatorContext parseTargetContext(String json, String jobName) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, TargetCalculatorContext.class);
+        } catch (Exception e) {
+            log.error("Erro ao desserializar targetCalculatorContext para o job [{}]", jobName, e);
+            return null;
         }
     }
 }
