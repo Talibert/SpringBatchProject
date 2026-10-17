@@ -50,14 +50,16 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
         String dataReferencia = "2026-10-15";
 
         // 1. Solicita o cálculo para o calculatorJob (que depende do collectorJob)
-        JobExecution initialResult = orchestratorService.requestCalculation(
+        com.example.api_docker.infra.batch.service.OrchestratedJobTriggerResult initialResult = orchestratorService.triggerJob(
                 CalculatorJobConfig.CALCULATOR_JOB_NAME,
                 dataReferencia,
                 Map.of("origem", "e2e-kafka-test")
         );
 
-        // Como a coleta ainda não existia, o retorno inicial deve ser null (coleta disparada em background)
-        assertNull(initialResult, "Cálculo não deve ser executado de imediato antes da coleta");
+        // Como a coleta ainda não existia, o job não deve iniciar de imediato e deve acusar as dependências disparadas
+        assertFalse(initialResult.startedImmediately(), "Cálculo não deve ser executado de imediato antes da coleta");
+        assertNull(initialResult.jobExecution());
+        assertEquals(List.of(CollectorJobConfig.COLLECTOR_JOB_NAME), initialResult.triggeredDependencies());
 
         // 2. Aguarda o Kafka entregar o evento no BatchJobEventConsumer (timeout de 10s)
         ArgumentCaptor<CollectorCompletedEvent> eventCaptor = ArgumentCaptor.forClass(CollectorCompletedEvent.class);

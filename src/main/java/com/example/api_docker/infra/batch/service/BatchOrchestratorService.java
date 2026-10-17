@@ -50,53 +50,117 @@ public class BatchOrchestratorService {
     }
 
     /**
-     * Solicita a execução de um job calculador com checagem prévia de dependências.
-     * <p>
-     * Se todas as coletas já tiverem sido concluídas para a data, o cálculo é iniciado imediatamente.
-     * Caso contrário, dispara todos os jobs coletores pendentes em paralelo e aguarda a finalização
-     * via eventos no Kafka para destravar o cálculo.
-     *
-     * @param calculatorJobName Nome do job calculador.
-     * @param dataReferencia    Data de corte dos dados analíticos.
-     * @param customParams      Parâmetros adicionais de execução.
-     * @return {@link JobExecution} do cálculo se executado de imediato, ou {@code null} se aguardando coletas.
-     * @throws Exception em caso de falha de lançamento.
+     * Retorna a lista de todos os descritores de jobs registrados na aplicação.
      */
-    public JobExecution requestCalculation(
-            String calculatorJobName,
+    public List<JobDescriptor> getAvailableDescriptors() {
+        return List.copyOf(descriptorsByName.values());
+    }
+
+    /**
+     * Recupera o descritor de um job pelo nome.
+     */
+    public JobDescriptor getDescriptor(String jobName) {
+        return descriptorsByName.get(jobName);
+    }
+
+    /**
+     * Retorna a lista de todas as execuções de jobs que estão atualmente em andamento (STARTING ou STARTED).
+     *
+     * @return Lista de {@link JobExecution} em execução ordenada pelas mais recentes.
+     */
+    public List<JobExecution> getRunningJobExecutions() {
+        List<JobExecution> runningExecutions = new ArrayList<>();
+        for (String jobName : descriptorsByName.keySet()) {
+            Set<JobExecution> running = jobExplorer.findRunningJobExecutions(jobName);
+            if (running != null) {
+                runningExecutions.addAll(running);
+            }
+        }
+        runningExecutions.sort(Comparator.comparing(JobExecution::getId).reversed());
+        return runningExecutions;
+    }
+
+    /**
+     * Ponto de entrada unificado para solicitação de execução de jobs (chamado pelo Controller).
+     * <p>
+     * Se o job for do tipo {@link JobType#CALCULATOR}, avalia dependências: se faltarem coletas, dispara-as
+     * em paralelo e informa na resposta quais dependências foram acionadas. Se já estiverem satisfeitas,
+     * inicia o cálculo de imediato.
+     * Se for do tipo {@link JobType#COLLECTOR}, dispara diretamente.
+     *
+     * @param jobName        Nome do job solicitado.
+     * @param dataReferencia Data de corte e referência.
+     * @param customParams   Parâmetros adicionais customizados.
+     * @return {@link OrchestratedJobTriggerResult} com detalhes sobre início imediato ou disparo de dependências.
+     * @throws IllegalArgumentException se o job não for encontrado.
+     * @throws Exception em caso de erro no Spring Batch.
+     */
+    public OrchestratedJobTriggerResult triggerJob(
+            String jobName,
             String dataReferencia,
             Map<String, Object> customParams
     ) throws Exception {
-        JobDescriptor descriptor = descriptorsByName.get(calculatorJobName);
+        JobDescriptor descriptor = descriptorsByName.get(jobName);
         if (descriptor == null) {
-            throw new IllegalArgumentException("JobDescriptor não encontrado para o job: " + calculatorJobName);
+            throw new IllegalArgumentException("Job não encontrado no catálogo registrado: " + jobName);
         }
 
-        List<String> coletasPendentes = findPendingCollectorDependencies(calculatorJobName, dataReferencia);
+        Map<String, Object> params = buildParams(dataReferencia, customParams);
 
+        if (descriptor.type() == JobType.CALCULATOR) {
+            List<String> coletasPendentes = findPendingCollectorDependencies(jobName, dataReferencia);
+            if (coletasPendentes.isEmpty()) {
+                log.info("Todas as dependências do calculador [{}] estão satisfeitas para a data [{}]. Disparando cálculo imediatamente...",
+                        jobName, dataReferencia);
+                JobExecution execution = jobLauncherService.runJob(jobName, params);
+                return new OrchestratedJobTriggerResult(
+                        jobName,
+                        dataReferencia,
+                        execution,
+                        true,
+                        List.of(),
+                        String.format("Todas as dependências do calculador [%s] estão satisfeitas para a data [%s]. O cálculo foi iniciado em segundo plano.", jobName, dataReferencia)
+                );
+            } else {
+                log.warn("Calculador [{}] possui {} coletas pendentes para data [{}]: {}. Disparando coletores em paralelo...",
+                        jobName, coletasPendentes.size(), dataReferencia, coletasPendentes);
+
+                // Dispara todos os coletores pendentes em paralelo (executados pelo ThreadPool do Spring Batch)
+                for (String collectorJobName : coletasPendentes) {
+                    Map<String, Object> collectorParams = Map.of("dataReferencia", dataReferencia);
+                    jobLauncherService.runJob(collectorJobName, collectorParams);
+                }
+
+                return new OrchestratedJobTriggerResult(
+                        jobName,
+                        dataReferencia,
+                        null,
+                        false,
+                        coletasPendentes,
+                        String.format("Solicitação aceita. O calculador [%s] possui %d coleta(s) pendente(s) para a data [%s]: %s. As coletas foram disparadas em segundo plano e o cálculo iniciará automaticamente assim que concluírem.",
+                                jobName, coletasPendentes.size(), dataReferencia, coletasPendentes)
+                );
+            }
+        } else {
+            JobExecution execution = jobLauncherService.runJob(jobName, params);
+            return new OrchestratedJobTriggerResult(
+                    jobName,
+                    dataReferencia,
+                    execution,
+                    true,
+                    List.of(),
+                    String.format("Execução do job [%s] para a data [%s] solicitada com sucesso. O processamento ocorrerá em segundo plano.", jobName, dataReferencia)
+            );
+        }
+    }
+
+    private Map<String, Object> buildParams(String dataReferencia, Map<String, Object> customParams) {
         Map<String, Object> params = new HashMap<>();
         if (customParams != null) {
             params.putAll(customParams);
         }
         params.put("dataReferencia", dataReferencia);
-
-        if (coletasPendentes.isEmpty()) {
-            log.info("Todas as dependências do calculador [{}] estão satisfeitas para a data [{}]. Disparando cálculo imediatamente...",
-                    calculatorJobName, dataReferencia);
-            return jobLauncherService.runJob(calculatorJobName, params);
-        }
-
-        log.warn("Calculador [{}] possui {} coletas pendentes para data [{}]: {}. Disparando coletores em paralelo...",
-                calculatorJobName, coletasPendentes.size(), dataReferencia, coletasPendentes);
-
-        // Dispara todos os coletores pendentes em paralelo (executados pelo ThreadPool do Spring Batch)
-        for (String collectorJobName : coletasPendentes) {
-            Map<String, Object> collectorParams = new HashMap<>();
-            collectorParams.put("dataReferencia", dataReferencia);
-            jobLauncherService.runJob(collectorJobName, collectorParams);
-        }
-
-        return null;
+        return params;
     }
 
     /**

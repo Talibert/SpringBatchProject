@@ -60,9 +60,12 @@ class BatchOrchestratorServiceTest {
         JobExecution mockExecution = mock(JobExecution.class);
         when(jobLauncherService.runJob(eq("calculadorGeral"), any())).thenReturn(mockExecution);
 
-        JobExecution result = orchestratorService.requestCalculation("calculadorGeral", dataRef, Map.of());
+        OrchestratedJobTriggerResult result = orchestratorService.triggerJob("calculadorGeral", dataRef, Map.of());
 
         assertNotNull(result);
+        assertTrue(result.startedImmediately());
+        assertNotNull(result.jobExecution());
+        assertTrue(result.triggeredDependencies().isEmpty());
         verify(jobLauncherService, times(1)).runJob(eq("calculadorGeral"), any());
         verify(jobLauncherService, never()).runJob(eq("coletorA"), any());
         verify(jobLauncherService, never()).runJob(eq("coletorB"), any());
@@ -77,9 +80,12 @@ class BatchOrchestratorServiceTest {
         mockJobCompletedForDate("coletorA", dataRef);
         when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
 
-        JobExecution result = orchestratorService.requestCalculation("calculadorGeral", dataRef, Map.of());
+        OrchestratedJobTriggerResult result = orchestratorService.triggerJob("calculadorGeral", dataRef, Map.of());
 
-        assertNull(result, "Não deve disparar o calculador enquanto houver dependências pendentes");
+        assertNotNull(result);
+        assertFalse(result.startedImmediately(), "Não deve disparar o calculador enquanto houver dependências pendentes");
+        assertNull(result.jobExecution());
+        assertEquals(List.of("coletorB"), result.triggeredDependencies());
 
         // coletorA não precisa ser redisparado
         verify(jobLauncherService, never()).runJob(eq("coletorA"), any());
@@ -110,6 +116,81 @@ class BatchOrchestratorServiceTest {
 
         // Como coletorB veio no próprio evento (em memória) e coletorA já estava no banco, o calculador é acionado sem race condition!
         verify(jobLauncherService, times(1)).runJob(eq("calculadorGeral"), eq(Map.of("dataReferencia", dataRef)));
+    }
+
+    @Test
+    @DisplayName("triggerJob: Deve acionar diretamente job coletor e indicar startedImmediately=true")
+    void shouldTriggerCollectorDirectlyViaLauncher() throws Exception {
+        String dataRef = "2026-10-17";
+        JobExecution mockExecution = mock(JobExecution.class);
+        when(jobLauncherService.runJob(eq("coletorA"), any())).thenReturn(mockExecution);
+
+        OrchestratedJobTriggerResult result = orchestratorService.triggerJob("coletorA", dataRef, Map.of("origem", "bacen"));
+
+        assertNotNull(result);
+        assertTrue(result.startedImmediately());
+        assertTrue(result.triggeredDependencies().isEmpty());
+        assertSame(mockExecution, result.jobExecution());
+        verify(jobLauncherService, times(1)).runJob(eq("coletorA"), eq(Map.of("origem", "bacen", "dataReferencia", dataRef)));
+    }
+
+    @Test
+    @DisplayName("triggerJob: Deve disparar coletas pendentes e indicar startedImmediately=false para calculador com dependências")
+    void shouldTriggerCalculatorWithPendingDependencies() throws Exception {
+        String dataRef = "2026-10-17";
+        when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
+        when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
+
+        OrchestratedJobTriggerResult result = orchestratorService.triggerJob("calculadorGeral", dataRef, Map.of());
+
+        assertNotNull(result);
+        assertFalse(result.startedImmediately());
+        assertNull(result.jobExecution());
+        assertEquals(List.of("coletorA", "coletorB"), result.triggeredDependencies());
+        assertTrue(result.message().contains("possui 2 coleta(s) pendente(s)"));
+
+        verify(jobLauncherService, times(1)).runJob(eq("coletorA"), any());
+        verify(jobLauncherService, times(1)).runJob(eq("coletorB"), any());
+        verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
+    }
+
+    @Test
+    @DisplayName("triggerJob: Deve lançar IllegalArgumentException quando o job não existir no catálogo")
+    void shouldThrowExceptionWhenTriggeringUnknownJob() {
+        assertThrows(IllegalArgumentException.class, () ->
+                orchestratorService.triggerJob("jobInexistente", "2026-10-17", Map.of())
+        );
+    }
+
+    @Test
+    @DisplayName("getAvailableDescriptors e getDescriptor: Deve retornar catálogo de descritores registrados")
+    void shouldReturnDescriptors() {
+        List<JobDescriptor> descriptors = orchestratorService.getAvailableDescriptors();
+        assertEquals(3, descriptors.size());
+
+        JobDescriptor descriptor = orchestratorService.getDescriptor("coletorA");
+        assertNotNull(descriptor);
+        assertEquals(JobType.COLLECTOR, descriptor.type());
+    }
+
+    @Test
+    @DisplayName("getRunningJobExecutions: Deve retornar execuções em andamento ordenadas por ID decrescente")
+    void shouldReturnRunningJobExecutions() {
+        JobExecution exec1 = mock(JobExecution.class);
+        when(exec1.getId()).thenReturn(100L);
+
+        JobExecution exec2 = mock(JobExecution.class);
+        when(exec2.getId()).thenReturn(200L);
+
+        when(jobExplorer.findRunningJobExecutions("coletorA")).thenReturn(java.util.Set.of(exec1));
+        when(jobExplorer.findRunningJobExecutions("coletorB")).thenReturn(java.util.Set.of(exec2));
+        when(jobExplorer.findRunningJobExecutions("calculadorGeral")).thenReturn(java.util.Set.of());
+
+        List<JobExecution> running = orchestratorService.getRunningJobExecutions();
+
+        assertEquals(2, running.size());
+        assertEquals(200L, running.get(0).getId());
+        assertEquals(100L, running.get(1).getId());
     }
 
     private void mockJobCompletedForDate(String jobName, String dataReferencia) {
