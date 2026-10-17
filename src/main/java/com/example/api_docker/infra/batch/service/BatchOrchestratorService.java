@@ -2,7 +2,7 @@ package com.example.api_docker.infra.batch.service;
 
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -127,7 +127,10 @@ public class BatchOrchestratorService {
 
                 // Dispara todos os coletores pendentes em paralelo (executados pelo ThreadPool do Spring Batch)
                 for (String collectorJobName : coletasPendentes) {
-                    Map<String, Object> collectorParams = Map.of("dataReferencia", dataReferencia);
+                    Map<String, Object> collectorParams = Map.of(
+                            "dataReferencia", dataReferencia,
+                            "targetCalculatorJob", jobName
+                    );
                     jobLauncherService.runJob(collectorJobName, collectorParams);
                 }
 
@@ -164,43 +167,53 @@ public class BatchOrchestratorService {
     }
 
     /**
-     * Ponto de entrada acionado pelo Consumidor Kafka quando qualquer Job Coletor finaliza com sucesso.
+     * Ponto de entrada acionado quando um Job Coletor acionado por um Calculador alvo finaliza com sucesso.
      * <p>
-     * Avalia todos os calculadores que dependiam desse coletor. Se todas as dependências daquela data
-     * estiverem prontas, aciona o calculador.
+     * Avalia única e exclusivamente o {@code targetCalculatorJob}. Se todas as suas dependências estiverem
+     * satisfeitas para a data, dispara o cálculo.
+     * Não há avaliação em lote nem fallback: coletas avulsas nunca avaliam calculadores.
      *
-     * @param collectorJobName Nome do coletor concluído.
-     * @param dataReferencia   Data de referência concluída.
+     * @param collectorJobName    Nome do coletor concluído.
+     * @param dataReferencia      Data de referência concluída.
+     * @param targetCalculatorJob Nome do calculador alvo que solicitou a coleta (obrigatório).
      */
-    public void onCollectorCompleted(String collectorJobName, String dataReferencia) {
-        log.info("Notificação de conclusão recebida para coletor [{}] na data [{}]", collectorJobName, dataReferencia);
+    public void onCollectorCompleted(String collectorJobName, String dataReferencia, String targetCalculatorJob) {
+        if (targetCalculatorJob == null || targetCalculatorJob.isBlank()) {
+            log.warn("onCollectorCompleted acionado sem targetCalculatorJob para coletor [{}]. Nenhuma checagem será executada.",
+                    collectorJobName);
+            return;
+        }
 
-        // Encontra todos os calculadores que declaram dependência desse coletor
-        List<JobDescriptor> calculadoresInteressados = descriptorsByName.values().stream()
-                .filter(d -> d.type() == JobType.CALCULATOR)
-                .filter(d -> d.dependsOnJobNames().contains(collectorJobName))
-                .toList();
+        log.info("Notificação de conclusão recebida para coletor [{}] na data [{}], avaliando calculador alvo [{}]",
+                collectorJobName, dataReferencia, targetCalculatorJob);
 
-        for (JobDescriptor calculador : calculadoresInteressados) {
-            // O próprio coletor que emitiu o evento é considerado concluído (elimina race condition de commit no banco)
-            List<String> pendentes = findPendingCollectorDependencies(
-                    calculador.jobName(),
-                    dataReferencia,
-                    Set.of(collectorJobName)
-            );
+        JobDescriptor targetDescriptor = descriptorsByName.get(targetCalculatorJob);
+        if (targetDescriptor == null || targetDescriptor.type() != JobType.CALCULATOR
+                || !targetDescriptor.dependsOnJobNames().contains(collectorJobName)) {
+            log.warn("Job target [{}] não encontrado, não é CALCULATOR ou não depende do coletor [{}]",
+                    targetCalculatorJob, collectorJobName);
+            return;
+        }
 
-            if (pendentes.isEmpty()) {
-                log.info("🎉 Todas as dependências do calculador [{}] foram concluídas para data [{}]. Disparando cálculo automaticamente!",
-                        calculador.jobName(), dataReferencia);
-                try {
-                    jobLauncherService.runJob(calculador.jobName(), Map.of("dataReferencia", dataReferencia));
-                } catch (Exception e) {
-                    log.error("Erro ao disparar automaticamente calculador [{}] após término das coletas", calculador.jobName(), e);
-                }
-            } else {
-                log.info("Calculador [{}] na data [{}] ainda aguarda as seguintes coletas: {}",
-                        calculador.jobName(), dataReferencia, pendentes);
+        // O próprio coletor que emitiu o evento é considerado concluído (elimina race condition de commit no banco)
+        List<String> pendentes = findPendingCollectorDependencies(
+                targetDescriptor.jobName(),
+                dataReferencia,
+                Set.of(collectorJobName)
+        );
+
+        if (pendentes.isEmpty()) {
+            log.info("🎉 Todas as dependências do calculador alvo [{}] foram concluídas para data [{}]. Disparando cálculo automaticamente!",
+                    targetDescriptor.jobName(), dataReferencia);
+            try {
+                jobLauncherService.runJob(targetDescriptor.jobName(), Map.of("dataReferencia", dataReferencia));
+            } catch (Exception e) {
+                log.error("Erro ao disparar automaticamente calculador alvo [{}] após término das coletas",
+                        targetDescriptor.jobName(), e);
             }
+        } else {
+            log.info("Calculador alvo [{}] na data [{}] ainda aguarda as seguintes coletas: {}",
+                    targetDescriptor.jobName(), dataReferencia, pendentes);
         }
     }
 

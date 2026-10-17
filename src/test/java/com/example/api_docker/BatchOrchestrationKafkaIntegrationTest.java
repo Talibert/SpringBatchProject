@@ -1,6 +1,6 @@
 package com.example.api_docker;
 
-import com.example.api_docker.domain.batch.event.CollectorCompletedEvent;
+import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.example.api_docker.infra.batch.job.calculator.CalculatorJobConfig;
 import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
 import com.example.api_docker.infra.batch.service.BatchOrchestratorService;
@@ -27,10 +27,11 @@ import static org.mockito.Mockito.verify;
  * Teste End-to-End (E2E) com Embedded Kafka validando o fluxo reativo completo:
  * <ol>
  *   <li>Solicitação de cálculo sem dados coletados prévios.</li>
- *   <li>Disparo automático do Job Coletor faltante.</li>
- *   <li>Emissão do evento de término via Kafka (JobCompletionNotificationListener -> Kafka).</li>
- *   <li>Consumo do evento pelo BatchJobEventConsumer.</li>
+ *   <li>Disparo automático do Job Coletor faltante contendo targetCalculatorJob.</li>
+ *   <li>Emissão do BatchJobCompletedEvent do coletor via Kafka.</li>
+ *   <li>Consumo do evento pelo BatchJobEventConsumer e avaliação exclusiva do target.</li>
  *   <li>Destravamento e disparo automático do Job Calculador!</li>
+ *   <li>Emissão do BatchJobCompletedEvent do calculador via Kafka para captura pelo front.</li>
  * </ol>
  */
 class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
@@ -61,27 +62,37 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
         assertNull(initialResult.jobExecution());
         assertEquals(List.of(CollectorJobConfig.COLLECTOR_JOB_NAME), initialResult.triggeredDependencies());
 
-        // 2. Aguarda o Kafka entregar o evento no BatchJobEventConsumer (timeout de 10s)
-        ArgumentCaptor<CollectorCompletedEvent> eventCaptor = ArgumentCaptor.forClass(CollectorCompletedEvent.class);
-        verify(batchJobEventConsumer, timeout(10000).atLeastOnce()).onCollectorCompleted(eventCaptor.capture());
+        // 2. Aguarda o Kafka entregar os eventos no BatchJobEventConsumer (timeout de 10s)
+        // Deve receber tanto a conclusão do coletor quanto a conclusão subsequente do calculador
+        ArgumentCaptor<BatchJobCompletedEvent> eventCaptor = ArgumentCaptor.forClass(BatchJobCompletedEvent.class);
+        verify(batchJobEventConsumer, timeout(10000).atLeast(2)).onJobCompleted(eventCaptor.capture());
 
-        CollectorCompletedEvent event = eventCaptor.getValue();
-        assertEquals(CollectorJobConfig.COLLECTOR_JOB_NAME, event.jobName());
-        assertEquals(dataReferencia, event.dataReferencia());
-        assertEquals("COMPLETED", event.status());
+        List<BatchJobCompletedEvent> capturedEvents = eventCaptor.getAllValues();
 
-        // 3. Valida no JobExplorer que o calculatorJob foi disparado automaticamente e concluiu com sucesso
-        boolean calculatorCompleted = false;
-        long deadline = System.currentTimeMillis() + 10000;
+        // Valida evento do Coletor (contém targetCalculatorJob preenchido)
+        BatchJobCompletedEvent collectorEvent = capturedEvents.stream()
+                .filter(BatchJobCompletedEvent::isCollector)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Evento de conclusão do coletor não recebido"));
+        assertEquals(CollectorJobConfig.COLLECTOR_JOB_NAME, collectorEvent.jobName());
+        assertEquals(dataReferencia, collectorEvent.dataReferencia());
+        assertEquals("COMPLETED", collectorEvent.status());
+        assertEquals(CalculatorJobConfig.CALCULATOR_JOB_NAME, collectorEvent.targetCalculatorJob());
 
-        while (System.currentTimeMillis() < deadline) {
-            if (orchestratorService.isJobCompletedForDate(CalculatorJobConfig.CALCULATOR_JOB_NAME, dataReferencia)) {
-                calculatorCompleted = true;
-                break;
-            }
-            Thread.sleep(200);
-        }
+        // Valida evento do Calculador (capturado para o front, sem target)
+        BatchJobCompletedEvent calculatorEvent = capturedEvents.stream()
+                .filter(BatchJobCompletedEvent::isCalculator)
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Evento de conclusão do calculador não recebido"));
+        assertEquals(CalculatorJobConfig.CALCULATOR_JOB_NAME, calculatorEvent.jobName());
+        assertEquals(dataReferencia, calculatorEvent.dataReferencia());
+        assertEquals("COMPLETED", calculatorEvent.status());
+        assertNull(calculatorEvent.targetCalculatorJob());
 
-        assertTrue(calculatorCompleted, "O calculatorJob deveria ter sido disparado pelo Kafka e concluído com sucesso!");
+        // 3. Valida no JobExplorer que o calculatorJob de fato concluiu com sucesso
+        boolean calculatorCompleted = orchestratorService.isJobCompletedForDate(
+                CalculatorJobConfig.CALCULATOR_JOB_NAME, dataReferencia
+        );
+        assertTrue(calculatorCompleted, "O calculatorJob deveria ter sido registrado no banco como COMPLETED!");
     }
 }

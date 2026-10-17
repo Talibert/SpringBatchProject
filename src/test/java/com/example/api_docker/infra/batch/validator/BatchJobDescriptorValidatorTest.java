@@ -2,7 +2,7 @@ package com.example.api_docker.infra.batch.validator;
 
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.Job;

@@ -1,10 +1,10 @@
 package com.example.api_docker.infra.batch.listener;
 
-import com.example.api_docker.domain.batch.event.CollectorCompletedEvent;
+import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.example.api_docker.domain.shared.DomainEventPublisher;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.BatchStatus;
@@ -23,8 +23,9 @@ import java.util.stream.Collectors;
  * Listener responsável pelo monitoramento e auditoria do ciclo de vida dos jobs do Spring Batch.
  * <p>
  * Além de registrar métricas de início e fim, publica um evento de domínio no Apache Kafka
- * quando um Job do tipo {@link JobType#COLLECTOR} finaliza com {@link BatchStatus#COMPLETED}.
- * Esse evento é consumido pelo orquestrador para destravar jobs calculadores dependentes.
+ * quando qualquer Job registrado (seja {@link JobType#COLLECTOR} ou {@link JobType#CALCULATOR})
+ * finaliza com {@link BatchStatus#COMPLETED}.
+ * Esse evento é consumido pelo orquestrador e fica disponível para notificação do frontend.
  */
 @Component
 public class JobCompletionNotificationListener implements JobExecutionListener {
@@ -65,32 +66,37 @@ public class JobCompletionNotificationListener implements JobExecutionListener {
 
         if (status == BatchStatus.COMPLETED) {
             log.info("Job [{}] finalizado com sucesso em {} ms.", jobName, duracaoMs);
-            publishCollectorCompletionEventIfApplicable(jobExecution);
+            publishJobCompletionEventIfApplicable(jobExecution);
         } else {
             log.error("Job [{}] finalizado com status [{}] em {} ms. Descrição de saída: {}",
                     jobName, status, duracaoMs, jobExecution.getExitStatus().getExitDescription());
         }
     }
 
-    private void publishCollectorCompletionEventIfApplicable(JobExecution jobExecution) {
+    private void publishJobCompletionEventIfApplicable(JobExecution jobExecution) {
         String jobName = jobExecution.getJobInstance().getJobName();
         JobDescriptor descriptor = descriptorsByName.get(jobName);
 
-        // Apenas Jobs classificados como COLLECTOR emitem notificação para orquestração
-        if (descriptor != null && descriptor.type() == JobType.COLLECTOR) {
+        // Notifica a conclusão com sucesso de qualquer job registrado (COLLECTOR ou CALCULATOR)
+        if (descriptor != null) {
             String dataReferencia = jobExecution.getJobParameters().getString("dataReferencia");
             if (dataReferencia == null || dataReferencia.isBlank()) {
                 dataReferencia = LocalDate.now().toString();
             }
 
-            CollectorCompletedEvent event = CollectorCompletedEvent.of(
+            String targetCalculatorJob = jobExecution.getJobParameters().getString("targetCalculatorJob");
+
+            BatchJobCompletedEvent event = BatchJobCompletedEvent.of(
                     jobName,
+                    descriptor.type(),
                     dataReferencia,
                     jobExecution.getId(),
-                    jobExecution.getStatus().name()
+                    jobExecution.getStatus().name(),
+                    targetCalculatorJob
             );
 
-            log.info("📢 Publicando CollectorCompletedEvent no Kafka: Job=[{}], DataRef=[{}]", jobName, dataReferencia);
+            log.info("📢 Publicando BatchJobCompletedEvent no Kafka: Job=[{}], Tipo=[{}], DataRef=[{}], TargetCalculator=[{}]",
+                    jobName, descriptor.type(), dataReferencia, targetCalculatorJob);
             eventPublisher.publish(event);
         }
     }

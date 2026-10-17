@@ -1,7 +1,7 @@
 package com.example.api_docker.infra.batch.service;
 
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,6 +35,11 @@ class BatchOrchestratorServiceTest {
             JobType.CALCULATOR,
             List.of("coletorA", "coletorB")
     );
+    private final JobDescriptor calculatorJob2 = new JobDescriptor(
+            "calculadorSecundario",
+            JobType.CALCULATOR,
+            List.of("coletorA")
+    );
 
     @BeforeEach
     void setUp() {
@@ -44,7 +49,7 @@ class BatchOrchestratorServiceTest {
         orchestratorService = new BatchOrchestratorService(
                 jobLauncherService,
                 jobExplorer,
-                List.of(() -> collectorA, () -> collectorB, () -> calculatorJob)
+                List.of(() -> collectorA, () -> collectorB, () -> calculatorJob, () -> calculatorJob2)
         );
     }
 
@@ -89,8 +94,11 @@ class BatchOrchestratorServiceTest {
 
         // coletorA não precisa ser redisparado
         verify(jobLauncherService, never()).runJob(eq("coletorA"), any());
-        // coletorB deve ser disparado
-        verify(jobLauncherService, times(1)).runJob(eq("coletorB"), any());
+        // coletorB deve ser disparado contendo dataReferencia e targetCalculatorJob
+        verify(jobLauncherService, times(1)).runJob(
+                eq("coletorB"),
+                eq(Map.of("dataReferencia", dataRef, "targetCalculatorJob", "calculadorGeral"))
+        );
         // calculadorGeral não deve rodar ainda
         verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
     }
@@ -104,15 +112,15 @@ class BatchOrchestratorServiceTest {
         when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
         when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
 
-        orchestratorService.onCollectorCompleted("coletorA", dataRef);
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, "calculadorGeral");
         verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
 
         // Cenário 2: coletorA já está no banco como COMPLETED, mas coletorB AINDA NÃO comitou no JobExplorer
         mockJobCompletedForDate("coletorA", dataRef);
         when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
 
-        // coletorB emite seu evento de conclusão
-        orchestratorService.onCollectorCompleted("coletorB", dataRef);
+        // coletorB emite seu evento de conclusão direcionado para calculadorGeral
+        orchestratorService.onCollectorCompleted("coletorB", dataRef, "calculadorGeral");
 
         // Como coletorB veio no próprio evento (em memória) e coletorA já estava no banco, o calculador é acionado sem race condition!
         verify(jobLauncherService, times(1)).runJob(eq("calculadorGeral"), eq(Map.of("dataReferencia", dataRef)));
@@ -166,7 +174,7 @@ class BatchOrchestratorServiceTest {
     @DisplayName("getAvailableDescriptors e getDescriptor: Deve retornar catálogo de descritores registrados")
     void shouldReturnDescriptors() {
         List<JobDescriptor> descriptors = orchestratorService.getAvailableDescriptors();
-        assertEquals(3, descriptors.size());
+        assertEquals(4, descriptors.size());
 
         JobDescriptor descriptor = orchestratorService.getDescriptor("coletorA");
         assertNotNull(descriptor);
@@ -185,12 +193,57 @@ class BatchOrchestratorServiceTest {
         when(jobExplorer.findRunningJobExecutions("coletorA")).thenReturn(java.util.Set.of(exec1));
         when(jobExplorer.findRunningJobExecutions("coletorB")).thenReturn(java.util.Set.of(exec2));
         when(jobExplorer.findRunningJobExecutions("calculadorGeral")).thenReturn(java.util.Set.of());
+        when(jobExplorer.findRunningJobExecutions("calculadorSecundario")).thenReturn(java.util.Set.of());
 
         List<JobExecution> running = orchestratorService.getRunningJobExecutions();
 
         assertEquals(2, running.size());
         assertEquals(200L, running.get(0).getId());
         assertEquals(100L, running.get(1).getId());
+    }
+
+    @Test
+    @DisplayName("Modelo Direcionado: Deve disparar APENAS o calculador alvo quando múltiplos calculadores dependem do mesmo coletor")
+    void shouldTriggerOnlyTargetCalculatorWhenSpecified() throws Exception {
+        String dataRef = "2026-10-15";
+
+        // Ambos calculadorGeral (após coletorB pronto) e calculadorSecundario dependem de coletorA
+        mockJobCompletedForDate("coletorB", dataRef);
+
+        // Notifica que coletorA terminou, mas direcionado apenas para calculadorSecundario
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, "calculadorSecundario");
+
+        // Apenas calculadorSecundario deve ser executado
+        verify(jobLauncherService, times(1)).runJob(eq("calculadorSecundario"), eq(Map.of("dataReferencia", dataRef)));
+        verify(jobLauncherService, never()).runJob(eq("calculadorGeral"), any());
+    }
+
+    @Test
+    @DisplayName("Modelo Direcionado: Não deve disparar nenhum calculador quando targetCalculatorJob for nulo ou vazio")
+    void shouldNotTriggerAnyCalculatorWhenTargetCalculatorIsNullOrEmpty() throws Exception {
+        String dataRef = "2026-10-15";
+
+        // Ambos calculadores dependem de coletorA. coletorB já está pronto no banco para calculadorGeral.
+        mockJobCompletedForDate("coletorB", dataRef);
+
+        // Notifica que coletorA terminou sem target (ou vazio)
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, null);
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, "");
+        orchestratorService.onCollectorCompleted("coletorA", dataRef, "   ");
+
+        // Nenhum calculador deve ser disparado
+        verify(jobLauncherService, never()).runJob(any(), any());
+    }
+
+    @Test
+    @DisplayName("Modelo Direcionado: Não deve disparar nenhum calculador se o target informado não depender do coletor")
+    void shouldNotTriggerWhenTargetDoesNotDependOnCollector() throws Exception {
+        String dataRef = "2026-10-15";
+
+        // calculadorSecundario depende apenas de coletorA, não depende de coletorB
+        orchestratorService.onCollectorCompleted("coletorB", dataRef, "calculadorSecundario");
+
+        verify(jobLauncherService, never()).runJob(any(), any());
     }
 
     private void mockJobCompletedForDate(String jobName, String dataReferencia) {

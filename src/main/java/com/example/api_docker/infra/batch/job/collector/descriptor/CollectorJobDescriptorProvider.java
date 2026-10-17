@@ -2,7 +2,7 @@ package com.example.api_docker.infra.batch.job.collector.descriptor;
 
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
 import org.springframework.stereotype.Component;
 

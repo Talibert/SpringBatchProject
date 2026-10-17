@@ -1,5 +1,7 @@
 package com.example.api_docker.infra.batch.descriptor;
 
+import com.example.api_docker.domain.batch.JobType;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

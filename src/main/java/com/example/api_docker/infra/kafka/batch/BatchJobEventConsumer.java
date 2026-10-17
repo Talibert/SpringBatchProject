@@ -1,6 +1,6 @@
 package com.example.api_docker.infra.kafka.batch;
 
-import com.example.api_docker.domain.batch.event.CollectorCompletedEvent;
+import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.example.api_docker.infra.batch.service.BatchOrchestratorService;
 import com.example.api_docker.infra.kafka.KafkaConsumer;
 import lombok.RequiredArgsConstructor;
@@ -10,8 +10,11 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Consumidor Kafka responsável por escutar notificações de jobs de lote concluídos
- * e acionar a sincronização / destravamento de dependências no orquestrador.
+ * Consumidor Kafka responsável por escutar notificações de término de jobs de lote (coletores e calculadores).
+ * <p>
+ * O evento é capturado para fins de auditoria e resposta ao frontend.
+ * O plus de checar o calculador alvo só é acionado se o job finalizado for um Coletor
+ * decorrente da dependência de um Calculador (com {@code targetCalculatorJob} preenchido).
  */
 @Slf4j
 @Component
@@ -22,15 +25,21 @@ public class BatchJobEventConsumer extends KafkaConsumer {
     private final BatchOrchestratorService orchestratorService;
 
     /**
-     * Escuta o término de jobs coletores para avaliar se os calculadores dependentes podem ser disparados.
+     * Escuta a finalização de qualquer job de lote.
      *
-     * @param event Evento contendo os metadados do coletor finalizado e a data de referência.
+     * @param event Evento contendo os metadados do job finalizado.
      */
-    @KafkaListener(topics = "batch.collector.completed", groupId = "${spring.kafka.consumer.group-id:my-group}")
-    public void onCollectorCompleted(CollectorCompletedEvent event) {
-        log.info("📢 [KAFKA BATCH CONSUMER] Evento recebido: Coletor finalizado! Job=[{}], DataRef=[{}], Status=[{}]",
-                event.jobName(), event.dataReferencia(), event.status());
+    @KafkaListener(topics = "batch.job.completed", groupId = "${spring.kafka.consumer.group-id:my-group}")
+    public void onJobCompleted(BatchJobCompletedEvent event) {
+        log.info("📢 [KAFKA BATCH CONSUMER] Job finalizado! Job=[{}], Tipo=[{}], DataRef=[{}], Status=[{}], TargetCalculator=[{}]",
+                event.jobName(), event.jobType(), event.dataReferencia(), event.status(), event.targetCalculatorJob());
 
-        orchestratorService.onCollectorCompleted(event.jobName(), event.dataReferencia());
+        // Se disparamos APENAS o coletor (sem target), ele NÃO checa calculadores.
+        // O plus de checar o target SÓ ocorre se o coletor vier da dependência de um calculador.
+        if (event.isCollector() && event.hasTargetCalculator()) {
+            orchestratorService.onCollectorCompleted(event.jobName(), event.dataReferencia(), event.targetCalculatorJob());
+        } else {
+            log.debug("Job [{}] finalizado sem target calculator. Nenhuma checagem de orquestração necessária.", event.jobName());
+        }
     }
 }

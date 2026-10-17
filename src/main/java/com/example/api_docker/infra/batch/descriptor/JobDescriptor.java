@@ -1,5 +1,7 @@
 package com.example.api_docker.infra.batch.descriptor;
 
+import com.example.api_docker.domain.batch.JobType;
+
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;

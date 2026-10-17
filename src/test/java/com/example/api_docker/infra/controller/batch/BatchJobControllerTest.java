@@ -2,7 +2,7 @@ package com.example.api_docker.infra.controller.batch;
 
 import com.example.api_docker.ControllerAbstractTests;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.infra.batch.descriptor.JobType;
+import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.infra.batch.service.BatchJobLauncherService;
 import com.example.api_docker.infra.batch.service.BatchOrchestratorService;
 import com.example.api_docker.infra.batch.service.OrchestratedJobTriggerResult;
