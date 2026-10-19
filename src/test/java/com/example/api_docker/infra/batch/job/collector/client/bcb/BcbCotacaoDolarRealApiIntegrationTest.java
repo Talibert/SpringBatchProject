@@ -13,6 +13,7 @@ import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -73,20 +74,18 @@ class BcbCotacaoDolarRealApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("Deve bater na API real do BCB e desserializar com sucesso para BcbCotacaoDolarPayload")
-    void deveConsultarApiRealEDesserializarDtoComSucesso() {
+    @DisplayName("Deve bater na API real do BCB e retornar diretamente a lista de BcbCotacaoDolarPayload")
+    void deveConsultarApiRealERetornarListaDePayloadComSucesso() {
         LocalDate dataInicial = LocalDate.of(2023, 10, 1);
         LocalDate dataFinal = LocalDate.of(2023, 10, 5);
 
-        BcbCotacaoDolarPayload payload = bcbClient.buscarCotacaoPeriodo(dataInicial, dataFinal, 10);
+        List<BcbCotacaoDolarPayload> cotacoes = bcbClient.buscarCotacaoPeriodo(dataInicial, dataFinal, 10);
 
-        assertThat(payload).isNotNull();
-        assertThat(payload.context()).contains("CotacaoDolarPeriodo");
-        assertThat(payload.value()).isNotEmpty();
+        assertThat(cotacoes).isNotEmpty();
 
-        BcbCotacaoDolarPayload.CotacaoItemPayload primeiroItem = payload.value().get(0);
-        assertThat(primeiroItem.cotacaoCompra()).isNotNull().isPositive();
-        assertThat(primeiroItem.cotacaoVenda()).isNotNull().isPositive();
-        assertThat(primeiroItem.dataHoraCotacao()).isNotBlank();
+        BcbCotacaoDolarPayload primeiraCotacao = cotacoes.get(0);
+        assertThat(primeiraCotacao.cotacaoCompra()).isNotNull().isPositive();
+        assertThat(primeiraCotacao.cotacaoVenda()).isNotNull().isPositive();
+        assertThat(primeiraCotacao.dataHoraCotacao()).isNotBlank();
     }
 }

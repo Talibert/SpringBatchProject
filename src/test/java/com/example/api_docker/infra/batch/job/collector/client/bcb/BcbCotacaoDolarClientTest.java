@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClient;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -72,8 +73,8 @@ class BcbCotacaoDolarClientTest {
     }
 
     @Test
-    @DisplayName("Deve buscar e desserializar cotação do dólar para BcbCotacaoDolarPayload com sucesso")
-    void deveBuscarCotacaoComSucesso() {
+    @DisplayName("Deve buscar e extrair diretamente a lista de BcbCotacaoDolarPayload com sucesso")
+    void deveBuscarCotacaoRetornandoListaComSucesso() {
         LocalDate dataInicial = LocalDate.of(2026, 10, 1);
         LocalDate dataFinal = LocalDate.of(2026, 10, 2);
 
@@ -101,13 +102,13 @@ class BcbCotacaoDolarClientTest {
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(mockResponseBody, MediaType.APPLICATION_JSON));
 
-        BcbCotacaoDolarPayload payload = bcbClient.buscarCotacaoPeriodo(dataInicial, dataFinal, 100);
+        List<BcbCotacaoDolarPayload> cotacoes = bcbClient.buscarCotacaoPeriodo(dataInicial, dataFinal, 100);
 
-        assertThat(payload).isNotNull();
-        assertThat(payload.value()).hasSize(2);
-        assertThat(payload.value().get(0).cotacaoCompra()).isEqualTo(new BigDecimal("5.4510"));
-        assertThat(payload.value().get(0).cotacaoVenda()).isEqualTo(new BigDecimal("5.4516"));
-        assertThat(payload.value().get(0).dataHoraCotacao()).isEqualTo("2026-10-01 13:05:00.0");
+        assertThat(cotacoes).isNotNull();
+        assertThat(cotacoes).hasSize(2);
+        assertThat(cotacoes.get(0).cotacaoCompra()).isEqualByComparingTo(new BigDecimal("5.4510"));
+        assertThat(cotacoes.get(0).cotacaoVenda()).isEqualByComparingTo(new BigDecimal("5.4516"));
+        assertThat(cotacoes.get(0).dataHoraCotacao()).isEqualTo("2026-10-01 13:05:00.0");
 
         mockServer.verify();
     }

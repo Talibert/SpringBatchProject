@@ -3,6 +3,7 @@ package com.example.api_docker.infra.batch.job.collector.client.bcb;
 import com.example.api_docker.infra.batch.job.collector.client.bcb.dto.BcbCotacaoDolarPayload;
 import com.example.api_docker.infra.http.HttpDownloadClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,14 +14,16 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
  * Cliente especializado para consulta e download das cotações do dólar (PTAX)
  * junto à API OData do Banco Central do Brasil (Olinda).
  * <p>
- * Utiliza o {@link HttpDownloadClient} para obter o payload bruto e é responsável
- * por realizar o parsing para o seu {@link BcbCotacaoDolarPayload}.
+ * Utiliza o {@link HttpDownloadClient} para obter o payload bruto e extrai diretamente
+ * a lista de {@link BcbCotacaoDolarPayload} do nó {@code value} da resposta OData.
  */
 @Component
 public class BcbCotacaoDolarClient {
@@ -63,19 +66,27 @@ public class BcbCotacaoDolarClient {
     }
 
     /**
-     * Baixa os dados e realiza o parse para o payload estruturado de cotação.
+     * Baixa os dados e extrai diretamente a lista de cotações contidas no nó {@code value}.
      *
      * @param dataInicial Data inicial do período.
      * @param dataFinal   Data final do período.
      * @param top         Limite máximo de registros a retornar (ex: 100).
-     * @return Objeto tipado {@link BcbCotacaoDolarPayload}.
+     * @return Lista de {@link BcbCotacaoDolarPayload}.
      */
-    public BcbCotacaoDolarPayload buscarCotacaoPeriodo(LocalDate dataInicial, LocalDate dataFinal, int top) {
+    public List<BcbCotacaoDolarPayload> buscarCotacaoPeriodo(LocalDate dataInicial, LocalDate dataFinal, int top) {
         String jsonBruto = baixarCotacaoBruta(dataInicial, dataFinal, top);
 
         try {
-            return objectMapper.readValue(jsonBruto, BcbCotacaoDolarPayload.class);
-        } catch (JsonProcessingException e) {
+            JsonNode rootNode = objectMapper.readTree(jsonBruto);
+            JsonNode valueNode = rootNode.path("value");
+
+            if (valueNode.isMissingNode() || !valueNode.isArray()) {
+                return Collections.emptyList();
+            }
+
+            return objectMapper.readerForListOf(BcbCotacaoDolarPayload.class)
+                    .readValue(valueNode);
+        } catch (java.io.IOException e) {
             log.error("Erro ao converter JSON de cotação do BCB: {}", e.getMessage());
             throw new IllegalStateException("Falha no parse do retorno da API do Banco Central", e);
         }
