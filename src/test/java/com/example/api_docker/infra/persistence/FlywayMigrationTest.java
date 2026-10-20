@@ -44,8 +44,8 @@ class FlywayMigrationTest extends RepositoryAbstractTests {
 
         MigrationInfo current = flyway.info().current();
         assertNotNull(current);
-        assertEquals("2", current.getVersion().getVersion());
-        assertEquals("create spring batch tables", current.getDescription());
+        assertEquals("3", current.getVersion().getVersion());
+        assertEquals("create exchange rates table", current.getDescription());
     }
 
     @Test
@@ -56,6 +56,10 @@ class FlywayMigrationTest extends RepositoryAbstractTests {
 
             try (ResultSet tables = metaData.getTables(null, null, "USERS", null)) {
                 assertTrue(tables.next(), "Tabela USERS deve existir no banco de dados");
+            }
+
+            try (ResultSet tables = metaData.getTables(null, null, "EXCHANGE_RATES", null)) {
+                assertTrue(tables.next(), "Tabela EXCHANGE_RATES deve existir no banco de dados");
             }
 
             try (ResultSet tables = metaData.getTables(null, null, "BATCH_JOB_INSTANCE", null)) {
