@@ -12,18 +12,18 @@ class PaginationTest {
     @Test
     @DisplayName("Deve aplicar valores padrão e travas de segurança no PaginationRequest")
     void shouldApplyDefaultsAndSafetyLimitsOnPaginationRequest() {
-        var negativePage = PaginationRequest.of(-1, -5);
+        PaginationRequest negativePage = PaginationRequest.of(-1, -5);
         assertEquals(0, negativePage.page());
         assertEquals(10, negativePage.size());
         assertEquals("ASC", negativePage.sortDirection());
 
-        var excessiveSize = PaginationRequest.of(2, 500, "name", "desc");
+        PaginationRequest excessiveSize = PaginationRequest.of(2, 500, "name", "desc");
         assertEquals(2, excessiveSize.page());
         assertEquals(100, excessiveSize.size());
         assertEquals("name", excessiveSize.sortBy());
         assertEquals("DESC", excessiveSize.sortDirection());
 
-        var invalidDirection = PaginationRequest.of(0, 10, "email", "UNKNOWN");
+        PaginationRequest invalidDirection = PaginationRequest.of(0, 10, "email", "UNKNOWN");
         assertEquals("ASC", invalidDirection.sortDirection());
     }
 
@@ -55,7 +55,7 @@ class PaginationTest {
     @Test
     @DisplayName("Deve instanciar página vazia corretamente")
     void shouldCreateEmptyPageResult() {
-        var req = PaginationRequest.of(0, 10);
+        PaginationRequest req = PaginationRequest.of(0, 10);
         PageResult<String> empty = PageResult.empty(req);
 
         assertTrue(empty.items().isEmpty());

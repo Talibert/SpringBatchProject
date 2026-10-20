@@ -1,8 +1,10 @@
 package com.example.api_docker.infra.batch.job.collector.client.bcb;
 
+import com.example.api_docker.domain.exchangerate.Currency;
+import com.example.api_docker.domain.exchangerate.ExchangeRate;
+import com.example.api_docker.domain.exchangerate.ExchangeRateProvider;
 import com.example.api_docker.infra.batch.job.collector.client.bcb.dto.BcbCotacaoDolarPayload;
 import com.example.api_docker.infra.http.HttpDownloadClient;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -11,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -22,16 +25,16 @@ import java.util.Objects;
  * Cliente especializado para consulta e download das cotações do dólar (PTAX)
  * junto à API OData do Banco Central do Brasil (Olinda).
  * <p>
- * Utiliza o {@link HttpDownloadClient} para obter o payload bruto e extrai diretamente
- * a lista de {@link BcbCotacaoDolarPayload} do nó {@code value} da resposta OData.
+ * Implementa a porta de domínio {@link ExchangeRateProvider}, utilizando o
+ * {@link HttpDownloadClient} para obter o payload bruto e convertendo para {@link ExchangeRate}.
  */
 @Component
-public class BcbCotacaoDolarClient {
+public class BcbCotacaoDolarClient implements ExchangeRateProvider {
 
     private static final Logger log = LoggerFactory.getLogger(BcbCotacaoDolarClient.class);
 
-    // OData Olinda BCB espera formato MM-dd-yyyy com aspas simples, ex: '10-01-2026'
     private static final DateTimeFormatter BCB_DATE_FORMATTER = DateTimeFormatter.ofPattern("MM-dd-yyyy");
+    private static final int DEFAULT_TOP_LIMIT = 100;
 
     private final HttpDownloadClient httpDownloadClient;
     private final ObjectMapper objectMapper;
@@ -45,6 +48,17 @@ public class BcbCotacaoDolarClient {
         this.httpDownloadClient = httpDownloadClient;
         this.objectMapper = objectMapper;
         this.baseUrl = baseUrl;
+    }
+
+    @Override
+    public List<ExchangeRate> fetchExchangeRates(Currency currency, LocalDate startDate, LocalDate endDate) {
+        if (currency != Currency.USD) {
+            throw new IllegalArgumentException("BcbCotacaoDolarClient suporta apenas a moeda USD");
+        }
+        return buscarCotacaoPeriodo(startDate, endDate, DEFAULT_TOP_LIMIT)
+                .stream()
+                .map(BcbCotacaoDolarPayload::toDomain)
+                .toList();
     }
 
     /**
@@ -86,7 +100,7 @@ public class BcbCotacaoDolarClient {
 
             return objectMapper.readerForListOf(BcbCotacaoDolarPayload.class)
                     .readValue(valueNode);
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             log.error("Erro ao converter JSON de cotação do BCB: {}", e.getMessage());
             throw new IllegalStateException("Falha no parse do retorno da API do Banco Central", e);
         }
@@ -104,7 +118,7 @@ public class BcbCotacaoDolarClient {
                 .path("/CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)")
                 .queryParam("@dataInicial", dataInicialFormatada)
                 .queryParam("@dataFinalCotacao", dataFinalFormatada)
-                .queryParam("$top", top > 0 ? top : 100)
+                .queryParam("$top", top > 0 ? top : DEFAULT_TOP_LIMIT)
                 .queryParam("$format", "json")
                 .build(true)
                 .toUri();

@@ -110,6 +110,12 @@ class BcbCotacaoDolarClientTest {
         assertThat(cotacoes.get(0).cotacaoVenda()).isEqualByComparingTo(new BigDecimal("5.4516"));
         assertThat(cotacoes.get(0).dataHoraCotacao()).isEqualTo("2026-10-01 13:05:00.0");
 
+        com.example.api_docker.domain.exchangerate.ExchangeRate exchangeRate = cotacoes.get(0).toDomain();
+        assertThat(exchangeRate.getCurrency()).isEqualTo(com.example.api_docker.domain.exchangerate.Currency.USD);
+        assertThat(exchangeRate.getReferenceDate()).isEqualTo(LocalDate.of(2026, 10, 1));
+        assertThat(exchangeRate.getBuyRate()).isEqualByComparingTo(new BigDecimal("5.4510"));
+        assertThat(exchangeRate.getSellRate()).isEqualByComparingTo(new BigDecimal("5.4516"));
+
         mockServer.verify();
     }
 }

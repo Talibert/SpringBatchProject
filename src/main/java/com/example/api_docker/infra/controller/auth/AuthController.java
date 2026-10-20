@@ -1,5 +1,6 @@
 package com.example.api_docker.infra.controller.auth;
 
+import com.example.api_docker.application.auth.result.LoginResult;
 import com.example.api_docker.application.auth.usecase.LoginUseCase;
 import com.example.api_docker.infra.controller.auth.request.LoginRequest;
 import com.example.api_docker.infra.controller.auth.response.LoginResponse;
@@ -31,7 +32,7 @@ public class AuthController {
     })
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@RequestBody @Valid LoginRequest request) {
-        var result = loginUseCase.execute(request.toCommand());
+        LoginResult result = loginUseCase.execute(request.toCommand());
         return ResponseEntity.ok(LoginResponse.from(result));
     }
 }

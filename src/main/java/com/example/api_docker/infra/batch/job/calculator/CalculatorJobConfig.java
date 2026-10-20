@@ -27,6 +27,11 @@ public class CalculatorJobConfig {
      */
     public static final String CALCULATOR_JOB_NAME = "calculatorJob";
 
+    /**
+     * Identificador do step de cálculo.
+     */
+    public static final String CALCULATOR_STEP_NAME = "calculatorStep";
+
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
     private final JobCompletionNotificationListener jobExecutionListener;
@@ -44,26 +49,19 @@ public class CalculatorJobConfig {
     /**
      * Declara o Job Calculador vinculando o listener e o step de cálculo.
      *
-     * @param calculatorStep Step contendo a lógica de cálculo encapsulada em {@link StepCalculator}.
+     * @param stepCalculator Componente contendo a implementação do {@link org.springframework.batch.core.step.tasklet.Tasklet}.
      * @return Instância configurada do {@link Job}.
      */
     @Bean(name = CALCULATOR_JOB_NAME)
-    public Job calculatorJob(Step calculatorStep) {
+    public Job calculatorJob(StepCalculator stepCalculator) {
         return new JobBuilder(CALCULATOR_JOB_NAME, jobRepository)
                 .listener(jobExecutionListener)
-                .start(calculatorStep)
+                .start(buildStep(stepCalculator))
                 .build();
     }
 
-    /**
-     * Declara o step de execução delegando a lógica para a classe {@link StepCalculator}.
-     *
-     * @param stepCalculator Componente contendo a implementação do {@link org.springframework.batch.core.step.tasklet.Tasklet}.
-     * @return Instância configurada do {@link Step}.
-     */
-    @Bean
-    public Step calculatorStep(StepCalculator stepCalculator) {
-        return new StepBuilder("calculatorStep", jobRepository)
+    private Step buildStep(StepCalculator stepCalculator) {
+        return new StepBuilder(CALCULATOR_STEP_NAME, jobRepository)
                 .tasklet(stepCalculator, transactionManager)
                 .build();
     }

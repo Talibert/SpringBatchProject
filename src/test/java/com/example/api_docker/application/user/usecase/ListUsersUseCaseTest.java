@@ -35,8 +35,8 @@ class ListUsersUseCaseTest extends UnitAbstractTests {
     @Test
     @DisplayName("Deve executar busca paginada e mapear para UserResult")
     void shouldExecutePaginatedSearchAndMapToUserResult() {
-        var pagination = PaginationRequest.of(0, 10, "email", "ASC");
-        var query = new ListUsersQuery(pagination);
+        PaginationRequest pagination = PaginationRequest.of(0, 10, "email", "ASC");
+        ListUsersQuery query = new ListUsersQuery(pagination);
 
         User user = User.restore(
                 UserId.generate(),

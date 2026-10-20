@@ -1,6 +1,6 @@
 package com.example.api_docker.infra.batch.job.collector;
 
-import com.example.api_docker.infra.batch.job.collector.step.StepCollector;
+import com.example.api_docker.infra.batch.job.collector.step.UsdCollectorStep;
 import com.example.api_docker.infra.batch.listener.JobCompletionNotificationListener;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
@@ -12,26 +12,30 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
- * Configuração declarativa do Job Coletor base da aplicação.
+ * Configuração declarativa do Job Coletor de cotações de Dólar (USD).
  * <p>
  * <b>Papel na Arquitetura:</b>
  * Esta classe é puramente orquestradora: monta o pipeline do Job conectando os metadados,
- * listeners de auditoria e o step de execução ({@link StepCollector}). Toda a lógica operacional
- * de coleta reside na classe dedicada do Step.
+ * listeners de auditoria e o step de execução ({@link UsdCollectorStep}).
  */
 @Configuration
-public class CollectorJobConfig {
+public class UsdCollectorJobConfig {
 
     /**
-     * Identificador único do job coletor no contexto do Spring Batch.
+     * Identificador único do job coletor de dólar no contexto do Spring Batch.
      */
-    public static final String COLLECTOR_JOB_NAME = "collectorJob";
+    public static final String USD_COLLECTOR_JOB_NAME = "usdCollectorJob";
+
+    /**
+     * Identificador do step de coleta de dólar.
+     */
+    public static final String USD_COLLECTOR_STEP_NAME = "usdCollectorStep";
 
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
     private final JobCompletionNotificationListener jobExecutionListener;
 
-    public CollectorJobConfig(
+    public UsdCollectorJobConfig(
             JobRepository jobRepository,
             PlatformTransactionManager transactionManager,
             JobCompletionNotificationListener jobExecutionListener
@@ -42,29 +46,22 @@ public class CollectorJobConfig {
     }
 
     /**
-     * Declara o Job Coletor vinculando o listener e o step de coleta.
+     * Declara o Job Coletor de Dólar vinculando o listener e o step de coleta.
      *
-     * @param collectorStep Step contendo a lógica de coleta encapsulada em {@link StepCollector}.
+     * @param usdCollectorStep Componente contendo a implementação do {@link org.springframework.batch.core.step.tasklet.Tasklet}.
      * @return Instância configurada do {@link Job}.
      */
-    @Bean(name = COLLECTOR_JOB_NAME)
-    public Job collectorJob(Step collectorStep) {
-        return new JobBuilder(COLLECTOR_JOB_NAME, jobRepository)
+    @Bean(name = USD_COLLECTOR_JOB_NAME)
+    public Job usdCollectorJob(UsdCollectorStep usdCollectorStep) {
+        return new JobBuilder(USD_COLLECTOR_JOB_NAME, jobRepository)
                 .listener(jobExecutionListener)
-                .start(collectorStep)
+                .start(buildStep(usdCollectorStep))
                 .build();
     }
 
-    /**
-     * Declara o step de execução delegando a lógica para a classe {@link StepCollector}.
-     *
-     * @param stepCollector Componente contendo a implementação do {@link org.springframework.batch.core.step.tasklet.Tasklet}.
-     * @return Instância configurada do {@link Step}.
-     */
-    @Bean
-    public Step collectorStep(StepCollector stepCollector) {
-        return new StepBuilder("collectorStep", jobRepository)
-                .tasklet(stepCollector, transactionManager)
+    private Step buildStep(UsdCollectorStep usdCollectorStep) {
+        return new StepBuilder(USD_COLLECTOR_STEP_NAME, jobRepository)
+                .tasklet(usdCollectorStep, transactionManager)
                 .build();
     }
 }

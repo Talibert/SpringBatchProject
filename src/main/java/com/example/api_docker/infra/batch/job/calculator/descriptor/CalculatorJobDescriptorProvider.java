@@ -1,10 +1,10 @@
 package com.example.api_docker.infra.batch.job.calculator.descriptor;
 
+import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
-import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.infra.batch.job.calculator.CalculatorJobConfig;
-import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
+import com.example.api_docker.infra.batch.job.collector.UsdCollectorJobConfig;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -23,7 +23,7 @@ public class CalculatorJobDescriptorProvider implements BatchJobDescriptorProvid
         return new JobDescriptor(
                 CalculatorJobConfig.CALCULATOR_JOB_NAME,
                 JobType.CALCULATOR,
-                List.of(CollectorJobConfig.COLLECTOR_JOB_NAME)
+                List.of(UsdCollectorJobConfig.USD_COLLECTOR_JOB_NAME)
         );
     }
 }

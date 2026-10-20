@@ -1,16 +1,21 @@
 package com.example.api_docker.infra.batch.service;
 
 import com.example.api_docker.BatchIntegrationAbstractTests;
-import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
+import com.example.api_docker.domain.exchangerate.ExchangeRateProvider;
+import com.example.api_docker.infra.batch.job.collector.UsdCollectorJobConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.batch.core.BatchStatus;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Testes de integração para validação do serviço de lançamento e consulta de jobs.
@@ -19,6 +24,9 @@ class BatchJobLauncherServiceTest extends BatchIntegrationAbstractTests {
 
     @Autowired
     private BatchJobLauncherService jobLauncherService;
+
+    @MockitoBean
+    private ExchangeRateProvider exchangeRateProviderMock;
 
     @Test
     @DisplayName("Deve lançar exceção ao tentar disparar um job inexistente")
@@ -40,7 +48,7 @@ class BatchJobLauncherServiceTest extends BatchIntegrationAbstractTests {
                 "paramDouble", 99.95
         );
 
-        JobExecution execution = jobLauncherService.runJob(CollectorJobConfig.COLLECTOR_JOB_NAME, params);
+        JobExecution execution = jobLauncherService.runJob(UsdCollectorJobConfig.USD_COLLECTOR_JOB_NAME, params);
 
         assertNotNull(execution);
         assertEquals(BatchStatus.COMPLETED, execution.getStatus());
@@ -52,7 +60,7 @@ class BatchJobLauncherServiceTest extends BatchIntegrationAbstractTests {
     @Test
     @DisplayName("Deve consultar JobExecution por id")
     void shouldRetrieveJobExecutionById() throws Exception {
-        JobExecution execution = jobLauncherService.runJob(CollectorJobConfig.COLLECTOR_JOB_NAME, Map.of());
+        JobExecution execution = jobLauncherService.runJob(UsdCollectorJobConfig.USD_COLLECTOR_JOB_NAME, Map.of());
         assertNotNull(execution);
 
         JobExecution found = jobLauncherService.getJobExecution(execution.getId());

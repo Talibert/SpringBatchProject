@@ -25,7 +25,7 @@ public class UserSeedConfig {
             @Value("${admin.seed.email}") String email,
             @Value("${admin.seed.password}") String password) {
         return args -> {
-            var userEmail = new Email(email);
+            Email userEmail = new Email(email);
             if (!userRepository.existsByEmail(userEmail)) {
                 createUserUseCase.execute(new CreateUserCommand(firstName, lastName, email, password));
 

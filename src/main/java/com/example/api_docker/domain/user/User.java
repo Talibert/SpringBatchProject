@@ -54,7 +54,7 @@ public class User {
     }
 
     public List<DomainEvent> pullDomainEvents() {
-        var events = List.copyOf(domainEvents);
+        List<DomainEvent> events = List.copyOf(domainEvents);
         domainEvents.clear();
         return events;
     }

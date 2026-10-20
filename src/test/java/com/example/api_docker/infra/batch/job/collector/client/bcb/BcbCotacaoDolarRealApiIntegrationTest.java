@@ -87,5 +87,12 @@ class BcbCotacaoDolarRealApiIntegrationTest {
         assertThat(primeiraCotacao.cotacaoCompra()).isNotNull().isPositive();
         assertThat(primeiraCotacao.cotacaoVenda()).isNotNull().isPositive();
         assertThat(primeiraCotacao.dataHoraCotacao()).isNotBlank();
+
+        com.example.api_docker.domain.exchangerate.ExchangeRate exchangeRate = primeiraCotacao.toDomain();
+        assertThat(exchangeRate.getId()).isNotNull();
+        assertThat(exchangeRate.getCurrency()).isEqualTo(com.example.api_docker.domain.exchangerate.Currency.USD);
+        assertThat(exchangeRate.getReferenceDate()).isEqualTo(LocalDate.of(2023, 10, 2));
+        assertThat(exchangeRate.getBuyRate()).isEqualByComparingTo(primeiraCotacao.cotacaoCompra());
+        assertThat(exchangeRate.getSellRate()).isEqualByComparingTo(primeiraCotacao.cotacaoVenda());
     }
 }

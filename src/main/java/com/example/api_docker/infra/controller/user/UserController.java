@@ -83,7 +83,7 @@ public class UserController {
     })
     @GetMapping("/me")
     public ResponseEntity<UserResponse> me(@AuthenticationPrincipal UserId userId) {
-        var result = getUserUseCase.execute(new GetUserQuery(userId));
+        UserResult result = getUserUseCase.execute(new GetUserQuery(userId));
         return ResponseEntity.ok(UserResponse.from(result));
     }
 
@@ -95,7 +95,7 @@ public class UserController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<UserResponse> findById(@PathVariable UUID id) {
-        var result = getUserUseCase.execute(new GetUserQuery(new UserId(id)));
+        UserResult result = getUserUseCase.execute(new GetUserQuery(new UserId(id)));
         return ResponseEntity.ok(UserResponse.from(result));
     }
 

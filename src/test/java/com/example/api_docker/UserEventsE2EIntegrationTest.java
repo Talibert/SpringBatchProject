@@ -86,7 +86,7 @@ class UserEventsE2EIntegrationTest extends IntegrationAbstractTests {
     @Test
     @DisplayName("E2E: Deve alterar senha via HTTP, atualizar no banco e disparar evento consumido pelo Kafka")
     void shouldChangePasswordViaHttpAndConsumeEvent() throws Exception {
-        var seedUser = userRepository.findByEmail(new Email("admin@test.com")).orElseThrow();
+        User seedUser = userRepository.findByEmail(new Email("admin@test.com")).orElseThrow();
 
         String userToken = jwtTokenGenerator.generate(
                 seedUser.getId(),

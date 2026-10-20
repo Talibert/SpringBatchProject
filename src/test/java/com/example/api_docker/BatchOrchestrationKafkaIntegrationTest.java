@@ -1,8 +1,9 @@
 package com.example.api_docker;
 
 import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
+import com.example.api_docker.domain.exchangerate.ExchangeRateProvider;
 import com.example.api_docker.infra.batch.job.calculator.CalculatorJobConfig;
-import com.example.api_docker.infra.batch.job.collector.CollectorJobConfig;
+import com.example.api_docker.infra.batch.job.collector.UsdCollectorJobConfig;
 import com.example.api_docker.infra.batch.service.BatchOrchestratorService;
 import com.example.api_docker.infra.kafka.batch.BatchJobEventConsumer;
 import org.junit.jupiter.api.DisplayName;
@@ -13,6 +14,7 @@ import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobInstance;
 import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.util.List;
@@ -45,6 +47,9 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
     @MockitoSpyBean
     private BatchJobEventConsumer batchJobEventConsumer;
 
+    @MockitoBean
+    private ExchangeRateProvider exchangeRateProviderMock;
+
     @Test
     @DisplayName("E2E: Deve solicitar cálculo, disparar coleta pendente, notificar via Kafka e acionar calculador")
     void shouldOrchestrateCollectorAndCalculatorViaKafka() throws Exception {
@@ -60,7 +65,7 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
         // Como a coleta ainda não existia, o job não deve iniciar de imediato e deve acusar as dependências disparadas
         assertFalse(initialResult.startedImmediately(), "Cálculo não deve ser executado de imediato antes da coleta");
         assertNull(initialResult.jobExecution());
-        assertEquals(List.of(CollectorJobConfig.COLLECTOR_JOB_NAME), initialResult.triggeredDependencies());
+        assertEquals(List.of(UsdCollectorJobConfig.USD_COLLECTOR_JOB_NAME), initialResult.triggeredDependencies());
 
         // 2. Aguarda o Kafka entregar os eventos no BatchJobEventConsumer (timeout de 10s)
         // Deve receber tanto a conclusão do coletor quanto a conclusão subsequente do calculador
@@ -74,7 +79,7 @@ class BatchOrchestrationKafkaIntegrationTest extends IntegrationAbstractTests {
                 .filter(BatchJobCompletedEvent::isCollector)
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("Evento de conclusão do coletor não recebido"));
-        assertEquals(CollectorJobConfig.COLLECTOR_JOB_NAME, collectorEvent.jobName());
+        assertEquals(UsdCollectorJobConfig.USD_COLLECTOR_JOB_NAME, collectorEvent.jobName());
         assertEquals(dataReferencia, collectorEvent.dataReferencia());
         assertEquals("COMPLETED", collectorEvent.status());
         assertNotNull(collectorEvent.targetContext());

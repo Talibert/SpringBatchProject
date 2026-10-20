@@ -32,8 +32,8 @@ class AuthControllerTest extends ControllerAbstractTests {
 
     @Test
     void shouldReturnTokenWhenLoginWithValidCredentials() throws Exception {
-        var request = new LoginRequest("joao@email.com", "senha123");
-        var loginResult = new LoginResult(
+        LoginRequest request = new LoginRequest("joao@email.com", "senha123");
+        LoginResult loginResult = new LoginResult(
                 "jwt-token-gerado",
                 UUID.randomUUID(),
                 "João Silva",
@@ -52,7 +52,7 @@ class AuthControllerTest extends ControllerAbstractTests {
 
     @Test
     void shouldReturn401WhenLoginWithWrongPassword() throws Exception {
-        var request = new LoginRequest("joao@email.com", "senha-errada");
+        LoginRequest request = new LoginRequest("joao@email.com", "senha-errada");
 
         doThrow(new InvalidCredentialsException())
                 .when(loginUseCase).execute(any());
