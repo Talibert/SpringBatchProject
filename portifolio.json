@@ -1,5 +1,5 @@
 {
-  "title": "springBatchProject - Processamento de jobs",
+  "title": "SpringBatchProject - Processamento de jobs",
   "subtitle": "Uso do Spring Batch para orquestrar a coleta e calculo de informações.",
   "description": "API desenvolvida coletar informações de APIs publicas e executar trabalhos de cálculos para desenvolver relatórios..",
   "category": "Backend",
