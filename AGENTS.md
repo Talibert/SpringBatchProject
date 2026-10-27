@@ -66,8 +66,8 @@ Para evitar ambiguidade entre fronteiras arquiteturais, respeite rigorosamente o
 ## 6. Endpoint Unificado de Consulta de Recursos Coletados (`infra.controller.query`)
 
 - **Proibido criar um Controller REST por recurso coletado:** Todas as consultas paginadas de dados coletados pelos jobs passam exclusivamente pelo [`ResourceQueryController`](src/main/java/com/example/api_docker/infra/controller/query/ResourceQueryController.java) (`GET /query/{resource}`).
-- **Padrão Strategy via `ResourceQueryProvider<T>`:**
-  - Cada recurso/tabela de negócio coletada (ex: `exchange-rates`) deve ter sua própria implementação de [`ResourceQueryProvider<T>`](src/main/java/com/example/api_docker/infra/controller/query/provider/ResourceQueryProvider.java) anotada com `@Component` em `infra.controller.query.provider`.
+- **Padrão Strategy via `ResourceQueryProvider<T extends ResourceItemResponse>`:**
+  - Cada recurso/tabela de negócio coletada (ex: `exchange-rates`) deve ter sua própria implementação de [`ResourceQueryProvider<T>`](src/main/java/com/example/api_docker/infra/controller/query/provider/ResourceQueryProvider.java) anotada com `@Component` em `infra.controller.query.provider`, onde `T` implementa [`ResourceItemResponse`](src/main/java/com/example/api_docker/infra/controller/query/response/ResourceItemResponse.java).
   - O método `resourceName()` define o identificador na URL em *kebab-case* e no plural (ex: `"exchange-rates"`).
   - O provider converte o [`ResourceQueryFilterRequest`](src/main/java/com/example/api_docker/infra/controller/query/request/ResourceQueryFilterRequest.java) em uma `*Query` da camada `application`, aciona o `*UseCase` correspondente e mapeia o `PageResult<*Result>` para `PageResponse<*Response>`, garantindo um contrato JSON limpo e fortemente tipável por `interface` no frontend (Vue).
 

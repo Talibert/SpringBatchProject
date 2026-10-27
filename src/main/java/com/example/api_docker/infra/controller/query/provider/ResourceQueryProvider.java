@@ -1,6 +1,7 @@
 package com.example.api_docker.infra.controller.query.provider;
 
 import com.example.api_docker.infra.controller.query.request.ResourceQueryFilterRequest;
+import com.example.api_docker.infra.controller.query.response.ResourceItemResponse;
 import com.example.api_docker.infra.controller.response.PageResponse;
 
 /**
@@ -10,9 +11,9 @@ import com.example.api_docker.infra.controller.response.PageResponse;
  * implementar esta interface anotada com {@code @Component}. O Spring descobre automaticamente
  * todos os provedores sem necessidade de criar novos endpoints ou alterar o controller central.
  *
- * @param <T> Tipo do DTO de resposta ({@code *Response}) retornado nos itens da página.
+ * @param <T> Tipo do DTO de resposta ({@link ResourceItemResponse}) retornado nos itens da página.
  */
-public interface ResourceQueryProvider<T> {
+public interface ResourceQueryProvider<T extends ResourceItemResponse> {
 
     /**
      * Identificador único do recurso na URL (ex: {@code "exchange-rates"}).

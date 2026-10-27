@@ -3,6 +3,7 @@ package com.example.api_docker.infra.controller.query;
 import com.example.api_docker.domain.shared.pagination.PaginationRequest;
 import com.example.api_docker.infra.controller.query.provider.ResourceQueryProvider;
 import com.example.api_docker.infra.controller.query.request.ResourceQueryFilterRequest;
+import com.example.api_docker.infra.controller.query.response.ResourceItemResponse;
 import com.example.api_docker.infra.controller.response.PageResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -42,9 +43,9 @@ public class ResourceQueryController {
             "search"
     );
 
-    private final Map<String, ResourceQueryProvider<?>> providersByResource;
+    private final Map<String, ResourceQueryProvider<? extends ResourceItemResponse>> providersByResource;
 
-    public ResourceQueryController(List<ResourceQueryProvider<?>> providers) {
+    public ResourceQueryController(List<ResourceQueryProvider<? extends ResourceItemResponse>> providers) {
         this.providersByResource = providers.stream()
                 .collect(Collectors.toUnmodifiableMap(
                         ResourceQueryProvider::resourceName,
@@ -80,7 +81,7 @@ public class ResourceQueryController {
             @ApiResponse(responseCode = "404", description = "Recurso de consulta não encontrado")
     })
     @GetMapping("/{resource}")
-    public ResponseEntity<PageResponse<?>> queryResource(
+    public ResponseEntity<PageResponse<? extends ResourceItemResponse>> queryResource(
             @Parameter(description = "Nome do recurso coletado", example = "exchange-rates")
             @PathVariable String resource,
             @Parameter(description = "Número da página (iniciando em 0)", example = "0")
@@ -100,7 +101,7 @@ public class ResourceQueryController {
             @Parameter(hidden = true)
             @RequestParam Map<String, String> allQueryParams
     ) {
-        ResourceQueryProvider<?> provider = providersByResource.get(resource);
+        ResourceQueryProvider<? extends ResourceItemResponse> provider = providersByResource.get(resource);
         if (provider == null) {
             return ResponseEntity.notFound().build();
         }
@@ -115,7 +116,7 @@ public class ResourceQueryController {
                 pagination
         );
 
-        PageResponse<?> response = provider.query(filter);
+        PageResponse<? extends ResourceItemResponse> response = provider.query(filter);
         return ResponseEntity.ok(response);
     }
 

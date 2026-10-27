@@ -31,7 +31,7 @@ public record ExchangeRateResponse(
 
         @Schema(description = "Data e hora em que o registro foi salvo", example = "2026-10-01T14:00:00")
         LocalDateTime createdAt
-) {
+) implements ResourceItemResponse {
     public static ExchangeRateResponse from(ExchangeRateResult result) {
         return new ExchangeRateResponse(
                 result.id(),
