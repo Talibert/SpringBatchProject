@@ -1,6 +1,8 @@
 package com.example.api_docker.domain.exchangerate;
 
 import com.example.api_docker.RepositoryAbstractTests;
+import com.example.api_docker.domain.shared.pagination.PageResult;
+import com.example.api_docker.domain.shared.pagination.PaginationRequest;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -93,5 +95,44 @@ class ExchangeRateRepositoryTest extends RepositoryAbstractTests {
         assertEquals(2, results.size());
         assertEquals(LocalDate.of(2026, 9, 10), results.get(0).getReferenceDate());
         assertEquals(LocalDate.of(2026, 9, 11), results.get(1).getReferenceDate());
+    }
+
+    @Test
+    @DisplayName("Deve buscar cotações paginadas aplicando filtros opcionais de moeda e período")
+    void shouldFindAllPaginatedWithFilters() {
+        ExchangeRate usd1 = ExchangeRate.create(
+                Currency.USD,
+                LocalDateTime.of(2026, 10, 1, 13, 0, 0),
+                new BigDecimal("5.4000"),
+                new BigDecimal("5.4010")
+        );
+        ExchangeRate usd2 = ExchangeRate.create(
+                Currency.USD,
+                LocalDateTime.of(2026, 10, 2, 13, 0, 0),
+                new BigDecimal("5.4200"),
+                new BigDecimal("5.4210")
+        );
+        ExchangeRate eur1 = ExchangeRate.create(
+                Currency.EUR,
+                LocalDateTime.of(2026, 10, 2, 13, 0, 0),
+                new BigDecimal("5.9000"),
+                new BigDecimal("5.9010")
+        );
+
+        exchangeRateRepository.saveAll(List.of(usd1, usd2, eur1));
+
+        ExchangeRateFilter filter = new ExchangeRateFilter(
+                Currency.USD,
+                LocalDate.of(2026, 10, 1),
+                LocalDate.of(2026, 10, 2)
+        );
+        PaginationRequest pagination = PaginationRequest.of(0, 1, "quoteTimestamp", "DESC");
+
+        PageResult<ExchangeRate> pageResult = exchangeRateRepository.findAll(filter, pagination);
+
+        assertEquals(2L, pageResult.totalElements());
+        assertEquals(2, pageResult.totalPages());
+        assertEquals(1, pageResult.items().size());
+        assertEquals(LocalDate.of(2026, 10, 2), pageResult.items().get(0).getReferenceDate());
     }
 }
