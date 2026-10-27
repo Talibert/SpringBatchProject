@@ -63,9 +63,20 @@ Para evitar ambiguidade entre fronteiras arquiteturais, respeite rigorosamente o
 
 ---
 
-## 6. Diretrizes de Testes e CI/CD
+## 6. Endpoint Unificado de Consulta de Recursos Coletados (`infra.controller.query`)
+
+- **Proibido criar um Controller REST por recurso coletado:** Todas as consultas paginadas de dados coletados pelos jobs passam exclusivamente pelo [`ResourceQueryController`](src/main/java/com/example/api_docker/infra/controller/query/ResourceQueryController.java) (`GET /query/{resource}`).
+- **Padrão Strategy via `ResourceQueryProvider<T>`:**
+  - Cada recurso/tabela de negócio coletada (ex: `exchange-rates`) deve ter sua própria implementação de [`ResourceQueryProvider<T>`](src/main/java/com/example/api_docker/infra/controller/query/provider/ResourceQueryProvider.java) anotada com `@Component` em `infra.controller.query.provider`.
+  - O método `resourceName()` define o identificador na URL em *kebab-case* e no plural (ex: `"exchange-rates"`).
+  - O provider converte o [`ResourceQueryFilterRequest`](src/main/java/com/example/api_docker/infra/controller/query/request/ResourceQueryFilterRequest.java) em uma `*Query` da camada `application`, aciona o `*UseCase` correspondente e mapeia o `PageResult<*Result>` para `PageResponse<*Response>`, garantindo um contrato JSON limpo e fortemente tipável por `interface` no frontend (Vue).
+
+---
+
+## 7. Diretrizes de Testes e CI/CD
 
 - **Testes de Arquitetura:** Sempre garanta que `CleanArchitectureTest` passe após criar novas classes.
+- **Testes de Integração do Spring Batch:** Testes que executam jobs reais devem herdar de [`BatchIntegrationAbstractTests`](src/test/java/com/example/api_docker/BatchIntegrationAbstractTests.java) e registrar novos repositórios JPA no método `@AfterEach cleanUpDatabase()` caso novas tabelas de negócio sejam criadas.
 - **Migrations Flyway:** Ao adicionar uma nova migration em `src/main/resources/db/migration/V*__*.sql`, atualize o `FlywayMigrationTest` para refletir a nova versão atual e validar a tabela criada.
 - **Testes de Integração com APIs Externas Reais:**
   - Devem ficar no **mesmo pacote** da classe testada (preservando visibilidade de pacote).
