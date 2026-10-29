@@ -18,8 +18,8 @@ class BatchJobEventConsumerTest {
     private final BatchJobEventConsumer consumer = new BatchJobEventConsumer(orchestratorService);
 
     @Test
-    @DisplayName("Deve delegar para orchestratorService.onCollectorCompleted quando coletor tiver targetContext")
-    void shouldDelegateToOrchestratorWhenCollectorHasTargetCalculator() {
+    @DisplayName("Deve delegar o evento recebido diretamente para orchestratorService.handleJobCompletedEvent")
+    void shouldDelegateEventToOrchestratorService() {
         String jobName = "collectorJob";
         String dataReferencia = "2026-10-17";
         TargetCalculatorContext targetContext = TargetCalculatorContext.of("calculatorJob", Map.of("param1", "valor1"));
@@ -29,34 +29,6 @@ class BatchJobEventConsumerTest {
 
         consumer.onJobCompleted(event);
 
-        verify(orchestratorService, times(1)).onCollectorCompleted(jobName, dataReferencia, targetContext);
-    }
-
-    @Test
-    @DisplayName("NÃO deve delegar para orchestratorService quando coletor for disparado avulso (sem targetCalculatorJob)")
-    void shouldNotDelegateToOrchestratorWhenCollectorHasNoTarget() {
-        String jobName = "collectorJob";
-        String dataReferencia = "2026-10-17";
-        BatchJobCompletedEvent event = BatchJobCompletedEvent.of(
-                jobName, JobType.COLLECTOR, dataReferencia, 123L, "COMPLETED"
-        );
-
-        consumer.onJobCompleted(event);
-
-        verify(orchestratorService, never()).onCollectorCompleted(any(), any(), any());
-    }
-
-    @Test
-    @DisplayName("NÃO deve delegar para orchestratorService quando o job concluído for um CALCULATOR")
-    void shouldNotDelegateToOrchestratorWhenJobIsCalculator() {
-        String jobName = "calculatorJob";
-        String dataReferencia = "2026-10-17";
-        BatchJobCompletedEvent event = BatchJobCompletedEvent.of(
-                jobName, JobType.CALCULATOR, dataReferencia, 123L, "COMPLETED"
-        );
-
-        consumer.onJobCompleted(event);
-
-        verify(orchestratorService, never()).onCollectorCompleted(any(), any(), any());
+        verify(orchestratorService, times(1)).handleJobCompletedEvent(event);
     }
 }

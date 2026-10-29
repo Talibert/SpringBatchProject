@@ -1,7 +1,10 @@
 package com.example.api_docker.infra.batch.service;
 
+import com.example.api_docker.domain.batch.CalculatorBarrierKey;
+import com.example.api_docker.domain.batch.CalculatorBarrierState;
 import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.domain.batch.TargetCalculatorContext;
+import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.example.api_docker.infra.batch.descriptor.BatchJobDescriptorProvider;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +17,7 @@ import org.springframework.batch.core.explore.JobExplorer;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -39,6 +43,15 @@ public class BatchOrchestratorService {
     private final JobExplorer jobExplorer;
     private final Map<String, JobDescriptor> descriptorsByName;
     private final ObjectMapper objectMapper;
+
+    /**
+     * Mapa thread-safe de barreiras ativas indexado pelo Value Object {@link CalculatorBarrierKey}.
+     * <p>
+     * Cada entrada representa um Job Calculador que está aguardando a conclusão de seus Jobs Coletores
+     * para uma determinada data de referência. Quando o Calculador conclui sua execução, a entrada
+     * é removida deste mapa para evitar retenção desnecessária de memória no Singleton.
+     */
+    private final ConcurrentHashMap<CalculatorBarrierKey, CalculatorBarrierState> activeBarriers = new ConcurrentHashMap<>();
 
     public BatchOrchestratorService(
             BatchJobLauncherService jobLauncherService,
@@ -130,6 +143,8 @@ public class BatchOrchestratorService {
                 log.warn("Calculador [{}] possui {} coletas pendentes para data [{}]: {}. Disparando coletores em paralelo...",
                         jobName, coletasPendentes.size(), dataReferencia, coletasPendentes);
 
+                clearBarrierState(jobName, dataReferencia);
+
                 TargetCalculatorContext targetContext = TargetCalculatorContext.of(jobName, customParams);
                 String targetContextJson = serializeTargetContext(targetContext);
 
@@ -175,11 +190,40 @@ public class BatchOrchestratorService {
     }
 
     /**
+     * Ponto de entrada unificado para processar eventos de conclusão de qualquer job vindos de mensageria.
+     * <p>
+     * Centraliza a decisão de negócio: apenas eventos de jobs coletores concluídos com sucesso
+     * que possuam um {@link TargetCalculatorContext} acionam a verificação de barreira do calculador alvo.
+     *
+     * @param event Evento de conclusão recebido.
+     */
+    public void handleJobCompletedEvent(BatchJobCompletedEvent event) {
+        if (event == null) {
+            return;
+        }
+        if (!BatchStatus.COMPLETED.name().equalsIgnoreCase(event.status())) {
+            log.debug("Job [{}] finalizou com status [{}]. Orquestração ignorada.", event.jobName(), event.status());
+            return;
+        }
+        if (event.isCalculator()) {
+            clearBarrierState(event.jobName(), event.dataReferencia());
+            log.debug("Calculador [{}] finalizado para data [{}]. Estado em memória da barreira limpo.",
+                    event.jobName(), event.dataReferencia());
+            return;
+        }
+        if (event.isCollector() && event.hasTargetContext()) {
+            onCollectorCompleted(event.jobName(), event.dataReferencia(), event.targetContext());
+        } else {
+            log.debug("Job [{}] finalizado sem target context. Nenhuma checagem de orquestração necessária.", event.jobName());
+        }
+    }
+
+    /**
      * Ponto de entrada acionado quando um Job Coletor acionado por um Calculador alvo finaliza com sucesso.
      * <p>
      * Avalia única e exclusivamente as dependências do calculador especificado em {@code targetContext}.
-     * Se todas as dependências estiverem satisfeitas para a data, dispara o cálculo preservando integralmente
-     * os parâmetros customizados informados na solicitação original de cálculo.
+     * Protegido contra condições de corrida quando múltiplos coletores terminam simultaneamente:
+     * registra a conclusão em memória por barreira e sincroniza a avaliação/disparo.
      *
      * @param collectorJobName Nome do coletor concluído.
      * @param dataReferencia   Data de referência concluída.
@@ -204,28 +248,61 @@ public class BatchOrchestratorService {
             return;
         }
 
-        // O próprio coletor que emitiu o evento é considerado concluído (elimina race condition de commit no banco)
-        List<String> pendentes = findPendingCollectorDependencies(
-                targetDescriptor.jobName(),
-                dataReferencia,
-                Set.of(collectorJobName)
+        CalculatorBarrierKey barrierKey = CalculatorBarrierKey.of(targetDescriptor.jobName(), dataReferencia);
+        CalculatorBarrierState barrierState = activeBarriers.computeIfAbsent(
+                barrierKey,
+                key -> new CalculatorBarrierState()
         );
 
-        if (pendentes.isEmpty()) {
-            log.info("🎉 Todas as dependências do calculador alvo [{}] foram concluídas para data [{}]. Disparando cálculo com parâmetros originais preservados!",
-                    targetDescriptor.jobName(), dataReferencia);
-            try {
-                Map<String, Object> calculatorParams = new HashMap<>(targetContext.customParams());
-                calculatorParams.put("dataReferencia", dataReferencia);
-                jobLauncherService.runJob(targetDescriptor.jobName(), calculatorParams);
-            } catch (Exception e) {
-                log.error("Erro ao disparar automaticamente calculador alvo [{}] após término das coletas",
-                        targetDescriptor.jobName(), e);
+        // Sincroniza no próprio objeto de estado da barreira para garantir atomicidade entre coletores concorrentes
+        synchronized (barrierState) {
+            if (barrierState.isTriggered()) {
+                log.debug("Calculador alvo [{}] na data [{}] já foi disparado por outro evento concorrente. Ignorando.",
+                        targetDescriptor.jobName(), dataReferencia);
+                return;
             }
-        } else {
-            log.info("Calculador alvo [{}] na data [{}] ainda aguarda as seguintes coletas: {}",
-                    targetDescriptor.jobName(), dataReferencia, pendentes);
+
+            barrierState.registerCompletedCollector(collectorJobName);
+
+            List<String> pendentes = findPendingCollectorDependencies(
+                    targetDescriptor.jobName(),
+                    dataReferencia,
+                    barrierState.getCompletedCollectors()
+            );
+
+            if (pendentes.isEmpty()) {
+                barrierState.markTriggered();
+                log.info("🎉 Todas as dependências do calculador alvo [{}] foram concluídas para data [{}]. Disparando cálculo com parâmetros originais preservados!",
+                        targetDescriptor.jobName(), dataReferencia);
+                try {
+                    Map<String, Object> calculatorParams = new HashMap<>(targetContext.customParams());
+                    calculatorParams.put("dataReferencia", dataReferencia);
+                    jobLauncherService.runJob(targetDescriptor.jobName(), calculatorParams);
+                } catch (Exception e) {
+                    barrierState.revertTrigger();
+                    log.error("Erro ao disparar automaticamente calculador alvo [{}] após término das coletas",
+                            targetDescriptor.jobName(), e);
+                }
+            } else {
+                log.info("Calculador alvo [{}] na data [{}] ainda aguarda as seguintes coletas: {}",
+                        targetDescriptor.jobName(), dataReferencia, pendentes);
+            }
         }
+    }
+
+    /**
+     * Remove integralmente o estado transitório em memória associado a uma barreira ({@link CalculatorBarrierKey}).
+     */
+    public void clearBarrierState(String calculatorJobName, String dataReferencia) {
+        if (calculatorJobName == null || calculatorJobName.isBlank()
+                || dataReferencia == null || dataReferencia.isBlank()) {
+            return;
+        }
+        activeBarriers.remove(CalculatorBarrierKey.of(calculatorJobName, dataReferencia));
+    }
+
+    boolean hasActiveBarrierState(String calculatorJobName, String dataReferencia) {
+        return activeBarriers.containsKey(CalculatorBarrierKey.of(calculatorJobName, dataReferencia));
     }
 
     private String serializeTargetContext(TargetCalculatorContext context) {

@@ -3,6 +3,7 @@ package com.example.api_docker.infra.batch.service;
 import com.example.api_docker.infra.batch.descriptor.JobDescriptor;
 import com.example.api_docker.domain.batch.JobType;
 import com.example.api_docker.domain.batch.TargetCalculatorContext;
+import com.example.api_docker.domain.batch.event.BatchJobCompletedEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +17,10 @@ import org.springframework.batch.core.explore.JobExplorer;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -293,6 +298,111 @@ class BatchOrchestratorServiceTest {
                 eq("coletorB"),
                 eq(Map.of("dataReferencia", dataRef, "targetCalculatorContext", expectedJson))
         );
+    }
+
+    @Test
+    @DisplayName("handleJobCompletedEvent: Deve ignorar eventos de CALCULATOR ou coletores sem targetContext")
+    void shouldIgnoreCalculatorOrStandaloneCollectorEvents() throws Exception {
+        String dataRef = "2026-10-18";
+
+        BatchJobCompletedEvent standaloneCollectorEvent = BatchJobCompletedEvent.of(
+                "coletorA", JobType.COLLECTOR, dataRef, 1L, "COMPLETED"
+        );
+        BatchJobCompletedEvent calculatorEvent = BatchJobCompletedEvent.of(
+                "calculadorGeral", JobType.CALCULATOR, dataRef, 2L, "COMPLETED"
+        );
+        BatchJobCompletedEvent failedCollectorEvent = BatchJobCompletedEvent.of(
+                "coletorA", JobType.COLLECTOR, dataRef, 3L, "FAILED", TargetCalculatorContext.of("calculadorGeral")
+        );
+
+        orchestratorService.handleJobCompletedEvent(standaloneCollectorEvent);
+        orchestratorService.handleJobCompletedEvent(calculatorEvent);
+        orchestratorService.handleJobCompletedEvent(failedCollectorEvent);
+
+        verifyNoInteractions(jobLauncherService);
+    }
+
+    @Test
+    @DisplayName("Concorrência: Deve disparar o calculador exatamente UMA vez quando dois coletores terminam simultaneamente antes do commit no banco")
+    void shouldTriggerCalculatorExactlyOnceWhenTwoCollectorsFinishSimultaneouslyWithoutDbCommit() throws Exception {
+        String dataRef = "2026-10-19";
+
+        // Simula o pior caso de race condition: NENHUM dos dois coletores comitou COMPLETED no banco ainda
+        when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
+        when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
+
+        TargetCalculatorContext context = TargetCalculatorContext.of("calculadorGeral", Map.of("modo", "concorrente"));
+        BatchJobCompletedEvent eventA = BatchJobCompletedEvent.of("coletorA", JobType.COLLECTOR, dataRef, 101L, "COMPLETED", context);
+        BatchJobCompletedEvent eventB = BatchJobCompletedEvent.of("coletorB", JobType.COLLECTOR, dataRef, 102L, "COMPLETED", context);
+
+        CountDownLatch startGate = new CountDownLatch(1);
+        CountDownLatch doneGate = new CountDownLatch(2);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+
+        try {
+            executor.submit(() -> {
+                try {
+                    startGate.await();
+                    orchestratorService.handleJobCompletedEvent(eventA);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneGate.countDown();
+                }
+            });
+
+            executor.submit(() -> {
+                try {
+                    startGate.await();
+                    orchestratorService.handleJobCompletedEvent(eventB);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneGate.countDown();
+                }
+            });
+
+            // Libera as duas threads exatamente no mesmo instante
+            startGate.countDown();
+            assertTrue(doneGate.await(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+
+        // O calculador deve ter sido disparado exatamente 1 vez (nem 0, nem 2)
+        verify(jobLauncherService, times(1)).runJob(
+                eq("calculadorGeral"),
+                eq(Map.of("dataReferencia", dataRef, "modo", "concorrente"))
+        );
+    }
+
+    @Test
+    @DisplayName("Limpeza de memória: Deve remover estado em memória da barreira quando o calculador concluir ou for redisparado")
+    void shouldCleanUpBarrierStateWhenCalculatorCompletes() throws Exception {
+        String dataRef = "2026-10-20";
+        when(jobExplorer.getJobInstances("coletorA", 0, 100)).thenReturn(List.of());
+        when(jobExplorer.getJobInstances("coletorB", 0, 100)).thenReturn(List.of());
+
+        TargetCalculatorContext context = TargetCalculatorContext.of("calculadorGeral");
+
+        // 1. Primeiro coletor termina -> estado da barreira fica ativo em memória aguardando coletorB
+        orchestratorService.handleJobCompletedEvent(
+                BatchJobCompletedEvent.of("coletorA", JobType.COLLECTOR, dataRef, 201L, "COMPLETED", context)
+        );
+        assertTrue(orchestratorService.hasActiveBarrierState("calculadorGeral", dataRef));
+
+        // 2. Segundo coletor termina -> fecha a barreira e dispara o calculador
+        orchestratorService.handleJobCompletedEvent(
+                BatchJobCompletedEvent.of("coletorB", JobType.COLLECTOR, dataRef, 202L, "COMPLETED", context)
+        );
+        verify(jobLauncherService, times(1)).runJob(eq("calculadorGeral"), any());
+        assertTrue(orchestratorService.hasActiveBarrierState("calculadorGeral", dataRef));
+
+        // 3. Calculador emite evento de conclusão -> estado transitório da barreira é 100% removido da memória do Singleton
+        orchestratorService.handleJobCompletedEvent(
+                BatchJobCompletedEvent.of("calculadorGeral", JobType.CALCULATOR, dataRef, 203L, "COMPLETED")
+        );
+        assertFalse(orchestratorService.hasActiveBarrierState("calculadorGeral", dataRef));
     }
 
     private void mockJobCompletedForDate(String jobName, String dataReferencia) {
